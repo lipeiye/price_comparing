@@ -1,42 +1,16 @@
+// AI 只需返回这两项：补充的异常（重点是规格被改）+ 中文采购建议。
+// 比价表、价格、最低价、漏报、量级异常、模具费全部由后端代码算好后发给前端，
+// 不依赖 AI 返回，确保即使 AI 超时或失败，比价报告依然完整可用。
 exports.quoteAnalysisSchema = {
-  success: true,
-  suppliers: [{ id: 'supplier-a', name: '供应商 A' }],
-  items: [
-    {
-      id: 'item-001',
-      name: '原始商品名',
-      normalizedName: '标准商品名',
-      specification: '规格',
-      brand: '品牌或 null',
-      quantity: 1,
-      unit: '单位',
-      quotes: [
-        {
-          supplierId: 'supplier-a',
-          unitPrice: 0,
-          totalPrice: 0,
-          taxIncluded: true,
-          shippingFee: 0,
-          deliveryDays: 0,
-          matched: true,
-          confidence: 0.95,
-          specMismatch: false,
-        },
-      ],
-      lowestSupplierId: 'supplier-a',
-      lowestPrice: 0,
-      averagePrice: 0,
-      warning: '异常说明或空字符串',
-    },
-  ],
   warnings: [
     {
-      id: 'warning-001',
-      type: 'PRICE_OUTLIER',
+      id: 'warning-101',
+      type: 'SPEC_CHANGED',
       severity: 'high',
-      title: '明显高价',
-      message: '面向采购人员的中文说明',
+      title: '规格被供应商擅自修改',
+      message: '面向采购经理的中文说明，写明项目号、哪家供应商、改了什么、原要求是什么',
     },
   ],
-  summary: '中文采购建议',
+  summary:
+    '3-6 句中文采购建议：整体最低的是哪家、有多少项异常、价格 pass 后让哪家准备样品、最值得关注的 2-3 个具体项目',
 }

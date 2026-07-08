@@ -9,6 +9,13 @@ export function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency',
     currency: 'CNY',
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(value)
+}
+
+// 紧凑价格：¥157.1，省空间，用于表格单元格内的总价
+export function formatPrice(value) {
+  if (value === null || value === undefined) return '-'
+  const rounded = Math.round(value * 10) / 10
+  return `¥${rounded.toLocaleString('zh-CN', { maximumFractionDigits: 1 })}`
 }
