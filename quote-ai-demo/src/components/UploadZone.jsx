@@ -48,6 +48,7 @@ function UploadZone({ files, setFiles, setError, disabled }) {
     <div>
       <div
         className={`drop-zone ${isDragging ? 'is-dragging' : ''} ${disabled ? 'is-disabled' : ''}`}
+        data-onboarding="upload-zone"
         onDragOver={handleDragOver}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}

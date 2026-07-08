@@ -1059,6 +1059,141 @@ button {
   }
 }
 
+/* ============================
+   新手引导 Onboarding Guide
+   ============================ */
+
+.onboard-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+}
+
+.onboard-mask {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+.onboard-highlight {
+  position: fixed;
+  z-index: 9999;
+  border-radius: 10px;
+  box-shadow: 0 0 0 4px rgba(23, 92, 211, 0.65), 0 0 0 8px rgba(23, 92, 211, 0.15);
+  pointer-events: none;
+}
+
+/* 气泡卡片 */
+.onboard-tooltip {
+  position: fixed;
+  z-index: 10000;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border-radius: 10px;
+  box-shadow: 0 12px 48px rgba(16, 24, 40, 0.22);
+  padding: 22px;
+  pointer-events: auto;
+}
+
+.onboard-tooltip-step {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--blue);
+  letter-spacing: 0;
+  margin-bottom: 8px;
+}
+
+.onboard-tooltip-title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.onboard-tooltip-body {
+  margin: 0 0 20px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--muted-strong);
+}
+
+.onboard-tooltip-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.onboard-tooltip-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.onboard-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 0;
+}
+
+.onboard-btn--primary {
+  color: #fff;
+  background: var(--blue);
+}
+
+.onboard-btn--primary:hover {
+  background: var(--blue-dark);
+}
+
+.onboard-btn--prev {
+  color: var(--muted-strong);
+  background: #eef2f7;
+}
+
+.onboard-btn--prev:hover {
+  background: #dde3ef;
+}
+
+.onboard-btn--skip {
+  color: var(--muted);
+  background: transparent;
+}
+
+.onboard-btn--skip:hover {
+  color: var(--muted-strong);
+}
+
+/* 右下角重放按钮 */
+.onboard-replay {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 9990;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--muted-strong);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 12px rgba(16, 24, 40, 0.1);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.onboard-replay:hover {
+  color: var(--blue);
+  box-shadow: 0 4px 18px rgba(23, 92, 211, 0.18);
+}
+
 /* 打印样式：导出 PDF 时只显示报告面板 */
 @media print {
   body {

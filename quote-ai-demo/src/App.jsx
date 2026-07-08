@@ -8,6 +8,7 @@ import ComparisonTable from './components/ComparisonTable.jsx'
 import WarningCard from './components/WarningCard.jsx'
 import RecommendationPanel from './components/RecommendationPanel.jsx'
 import ReportPanel from './components/ReportPanel.jsx'
+import OnboardingGuide from './components/OnboardingGuide.jsx'
 import { analyzeQuotes, isMockAnalysisMode } from './services/analyzeQuotes.js'
 import {
   generateReport,
@@ -136,6 +137,7 @@ function App() {
   return (
     <div className="app-shell">
       <Header />
+      <OnboardingGuide />
 
       <main className="app-main">
         <section className="workspace">
@@ -168,6 +170,7 @@ function App() {
               <button
                 type="button"
                 className="primary-button"
+                data-onboarding="analyze-button"
                 disabled={!canAnalyze}
                 onClick={handleAnalyze}
               >
@@ -227,6 +230,7 @@ function App() {
                 <button
                   type="button"
                   className="report-button"
+                  data-onboarding="report-button"
                   onClick={handleGenerateReport}
                   disabled={isGeneratingReport}
                 >

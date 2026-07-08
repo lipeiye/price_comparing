@@ -27,7 +27,7 @@ function ReportPanel({ report, suppliers, items, generatedAt }) {
             <p className="report-meta">生成于 {formatDateTime(generatedAt)}</p>
           ) : null}
         </div>
-        <div className="report-export">
+        <div className="report-export" data-onboarding="export-buttons">
           <button type="button" className="ghost-button report-export-btn" onClick={handleExportWord}>
             <FileText size={16} />
             导出 Word
