@@ -129,20 +129,52 @@ async function callAi(workbooks, requestId) {
       signal: controller.signal,
     })
 
-    if (!aiResponse.ok) {
-      throw new Error(`AI HTTP ${aiResponse.status}`)
+    const responseText = await aiResponse.text()
+    let payload = null
+    try {
+      payload = JSON.parse(responseText)
+    } catch {
+      payload = null
     }
 
-    const payload = await aiResponse.json()
+    if (!aiResponse.ok) {
+      const aiMessage = extractAiErrorMessage(payload, responseText)
+      const error = userError(`Kimi API 调用失败：HTTP ${aiResponse.status}${aiMessage ? ` - ${aiMessage}` : ''}`, 502)
+      error.exposeDetail = true
+      throw error
+    }
+
     const content = payload.choices?.[0]?.message?.content
     if (!content) {
-      throw new Error('AI response has no content')
+      const error = userError('Kimi API 已返回，但没有生成可读取的 content 字段。', 502)
+      error.exposeDetail = true
+      throw error
     }
 
-    return JSON.parse(content)
+    try {
+      return JSON.parse(content)
+    } catch {
+      const error = userError('Kimi API 返回的内容不是合法 JSON，请稍后重试或调整提示词。', 502)
+      error.exposeDetail = true
+      throw error
+    }
   } finally {
     clearTimeout(timer)
   }
+}
+
+function extractAiErrorMessage(payload, responseText) {
+  const message =
+    payload?.error?.message ||
+    payload?.message ||
+    payload?.msg ||
+    payload?.error ||
+    responseText
+
+  if (!message) return ''
+  return String(message)
+    .replace(/sk-[A-Za-z0-9_-]+/g, 'sk-***')
+    .slice(0, 500)
 }
 
 function resolveEndpoint() {
