@@ -11,7 +11,7 @@ function Header() {
           </div>
           <div>
             <h1>智采 AI 报价比价</h1>
-            <p>Excel 报价单智能比价 · Kimi AI 实时分析</p>
+            <p>Excel 报价单智能比价 · DeepSeek 实时分析</p>
           </div>
         </div>
 

@@ -25,7 +25,7 @@ function AnalysisProgress({ steps, activeStep, isAnalyzing }) {
       <p className="helper-text">
         {isMockAnalysisMode
           ? '当前使用本地 Mock 数据，适合离线开发和界面调试。'
-          : '系统会将 Excel 表格内容提交给后端云函数，并由 Kimi AI 生成结构化分析。'}
+          : '系统会将 Excel 表格内容提交给后端云函数，并由 DeepSeek 生成结构化分析。'}
       </p>
     </div>
   )

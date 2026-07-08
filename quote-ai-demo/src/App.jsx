@@ -14,7 +14,7 @@ const progressSteps = [
   '正在读取 Excel 工作表',
   '正在统一商品名称与规格',
   '正在检测价格和条款异常',
-  '正在调用 Kimi AI 生成采购建议',
+  '正在调用 DeepSeek 生成采购建议',
 ]
 
 function App() {
@@ -179,7 +179,7 @@ function App() {
             <FileSearch size={28} />
             <div>
               <h2>上传 2 到 3 份 Excel 报价单后开始分析</h2>
-              <p>系统会读取表格内容，通过云函数调用 Kimi AI，并生成比价表、异常提示和采购建议。</p>
+              <p>系统会读取表格内容，通过云函数调用 DeepSeek，并生成比价表、异常提示和采购建议。</p>
             </div>
           </section>
         )}

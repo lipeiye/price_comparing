@@ -93,7 +93,7 @@ function normalizeCellValue(value) {
 
 async function callAi(workbooks, requestId) {
   const apiKey = process.env.AI_API_KEY
-  const model = process.env.AI_MODEL || 'kimi-k2.7-code'
+  const model = process.env.AI_MODEL || 'deepseek-v4-flash'
   const endpoint = resolveEndpoint()
 
   if (!apiKey) {
@@ -139,14 +139,14 @@ async function callAi(workbooks, requestId) {
 
     if (!aiResponse.ok) {
       const aiMessage = extractAiErrorMessage(payload, responseText)
-      const error = userError(`Kimi API 调用失败：HTTP ${aiResponse.status}${aiMessage ? ` - ${aiMessage}` : ''}`, 502)
+      const error = userError(`AI API 调用失败：HTTP ${aiResponse.status}${aiMessage ? ` - ${aiMessage}` : ''}`, 502)
       error.exposeDetail = true
       throw error
     }
 
     const content = payload.choices?.[0]?.message?.content
     if (!content) {
-      const error = userError('Kimi API 已返回，但没有生成可读取的 content 字段。', 502)
+      const error = userError('AI API 已返回，但没有生成可读取的 content 字段。', 502)
       error.exposeDetail = true
       throw error
     }
@@ -154,7 +154,7 @@ async function callAi(workbooks, requestId) {
     try {
       return JSON.parse(content)
     } catch {
-      const error = userError('Kimi API 返回的内容不是合法 JSON，请稍后重试或调整提示词。', 502)
+      const error = userError('AI API 返回的内容不是合法 JSON，请稍后重试或调整提示词。', 502)
       error.exposeDetail = true
       throw error
     }
@@ -182,7 +182,7 @@ function resolveEndpoint() {
   if (process.env.AI_API_BASE_URL) {
     return `${process.env.AI_API_BASE_URL.replace(/\/$/, '')}/chat/completions`
   }
-  return 'https://api.moonshot.ai/v1/chat/completions'
+  return 'https://api.deepseek.com/chat/completions'
 }
 
 function getRequestMethod(event) {

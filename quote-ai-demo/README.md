@@ -1,6 +1,6 @@
 # 智采 AI 报价比价 Demo
 
-企业采购报价比价网站。支持上传 2-3 份供应商 Excel 报价单，通过 CloudBase 云函数调用 Kimi AI，展示分析过程、结构化比价表、异常项和 AI 采购建议。
+企业采购报价比价网站。支持上传 2-3 份供应商 Excel 报价单，通过 CloudBase 云函数调用 DeepSeek，展示分析过程、结构化比价表、异常项和 AI 采购建议。
 
 ## 本地运行
 
@@ -49,12 +49,12 @@ CloudBase 云函数位于 `cloudfunctions/analyzeQuotes/`，它会：
 
 ```env
 AI_API_KEY=
-AI_API_BASE_URL=https://api.moonshot.ai/v1
-AI_API_ENDPOINT=https://api.moonshot.ai/v1/chat/completions
-AI_MODEL=kimi-k2.7-code
+AI_API_BASE_URL=https://api.deepseek.com
+AI_API_ENDPOINT=https://api.deepseek.com/chat/completions
+AI_MODEL=deepseek-v4-flash
 ```
 
-`AI_API_ENDPOINT` 优先级高于 `AI_API_BASE_URL`。如果只设置 `AI_API_BASE_URL`，云函数会自动拼接 `/chat/completions`。如果只配置 `AI_API_KEY`，云函数会默认使用 Kimi 官方接口和 `kimi-k2.7-code` 模型。
+`AI_API_ENDPOINT` 优先级高于 `AI_API_BASE_URL`。如果只设置 `AI_API_BASE_URL`，云函数会自动拼接 `/chat/completions`。如果只配置 `AI_API_KEY`，云函数会默认使用 DeepSeek 官方接口和 `deepseek-v4-flash` 模型。
 
 ## 部署说明
 
