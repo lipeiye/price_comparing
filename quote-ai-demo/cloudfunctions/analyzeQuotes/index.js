@@ -6,6 +6,9 @@ const { quoteAnalysisSchema } = require('./schema')
 const MAX_FILES = 3
 const MIN_FILES = 2
 const MAX_FILE_SIZE = 10 * 1024 * 1024
+const MAX_SHEETS = 5
+const MAX_ROWS_PER_SHEET = 120
+const MAX_COLUMNS_PER_SHEET = 100
 const ALLOWED_EXTENSIONS = new Set(['xlsx'])
 
 exports.main = async (event = {}) => {
@@ -71,12 +74,52 @@ async function extractWorkbookTables(buffer) {
     ? parsed
     : [{ sheet: 'Sheet1', data: parsed }]
 
-  return sheets.slice(0, 5).map((sheet) => ({
+  return sheets
+    .map(normalizeSheet)
+    .filter((sheet) => sheet.nonEmptyRows >= 2 && sheet.nonEmptyColumns >= 3)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_SHEETS)
+    .map((sheet) => ({
+      sheetName: sheet.sheetName,
+      rows: sheet.rows,
+    }))
+}
+
+function normalizeSheet(sheet) {
+  const data = Array.isArray(sheet.data) ? sheet.data : []
+  const columnIndexes = getNonEmptyColumnIndexes(data).slice(0, MAX_COLUMNS_PER_SHEET)
+  const rows = data
+    .filter(hasMeaningfulCells)
+    .slice(0, MAX_ROWS_PER_SHEET)
+    .map((row) => columnIndexes.map((index) => normalizeCellValue(row[index])))
+
+  return {
     sheetName: sheet.sheet || 'Sheet1',
-    rows: sheet.data
-      .slice(0, 80)
-      .map((row) => row.slice(0, 18).map(normalizeCellValue)),
-  }))
+    rows,
+    nonEmptyRows: rows.length,
+    nonEmptyColumns: columnIndexes.length,
+    score: rows.length * columnIndexes.length,
+  }
+}
+
+function getNonEmptyColumnIndexes(rows) {
+  const indexes = new Set()
+
+  rows.forEach((row) => {
+    row.forEach((cell, index) => {
+      if (isMeaningfulCell(cell)) indexes.add(index)
+    })
+  })
+
+  return Array.from(indexes).sort((a, b) => a - b)
+}
+
+function hasMeaningfulCells(row) {
+  return row.some(isMeaningfulCell)
+}
+
+function isMeaningfulCell(value) {
+  return value !== undefined && value !== null && String(value).trim() !== ''
 }
 
 function normalizeCellValue(value) {
