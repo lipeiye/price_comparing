@@ -137,7 +137,7 @@ function App() {
   return (
     <div className="app-shell">
       <Header />
-      <OnboardingGuide />
+      <OnboardingGuide hasResult={!!result} />
 
       <main className="app-main">
         <section className="workspace">

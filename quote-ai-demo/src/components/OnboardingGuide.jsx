@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CircleHelp } from 'lucide-react'
-import { useOnboarding, STEP_TARGETS, resolveTarget } from '../hooks/useOnboarding.js'
+import { useOnboarding, resolveTarget } from '../hooks/useOnboarding.js'
 
-// 每一步的内容定义
 const STEPS = [
   {
     title: '上传供应商报价单',
@@ -15,7 +14,7 @@ const STEPS = [
   },
   {
     title: '深度分析报告',
-    body: '比价表出来后，可以继续点这里调用更强的模型，输出七章多维分析报告——规格逐项核对、成本拆解、谈判建议。',
+    body: '比价结果出来后，点这里调用更强的模型，输出七章多维分析报告——规格逐项核对、成本拆解、谈判建议。',
   },
   {
     title: '导出报告',
@@ -23,36 +22,15 @@ const STEPS = [
   },
 ]
 
-// 定位策略：优先用 data-onboarding 属性，回退到特定选择器
 function getTargetRect(stepIndex) {
   const target = resolveTarget(stepIndex)
-  if (target) return target.getBoundingClientRect()
-
-  // 步骤 2（报告按钮）和步骤 3（导出按钮）可能尚未渲染
-  // 回退到页面中央，显示占位提示
-  if (stepIndex === 2 || stepIndex === 3) {
-    const cx = window.innerWidth / 2
-    const cy = window.innerHeight / 2
-    return {
-      left: cx - 140,
-      top: cy - 20,
-      width: 280,
-      height: 40,
-      right: cx + 140,
-      bottom: cy + 20,
-    }
-  }
-
-  return null
+  if (!target) return null
+  return target.getBoundingClientRect()
 }
 
-// 判断当前步骤目标是否存在
-function isTargetPresent(stepIndex) {
-  return resolveTarget(stepIndex) !== null
-}
-
-export default function OnboardingGuide() {
-  const { active, currentStep, totalSteps, next, prev, finish, skip, start } = useOnboarding()
+export default function OnboardingGuide({ hasResult }) {
+  const { active, currentStep, totalSteps, waiting, next, prev, finish, skip, start } =
+    useOnboarding({ hasResult })
   const [rect, setRect] = useState(null)
   const rafRef = useRef(null)
 
@@ -81,23 +59,31 @@ export default function OnboardingGuide() {
     }
   }, [active, currentStep])
 
-  const targetPresent = isTargetPresent(currentStep)
   const step = STEPS[currentStep]
   const isLast = currentStep === totalSteps - 1
 
-  // 遮罩四个矩形的样式：围绕目标区域留出窗口
   function maskStyle(side) {
     if (!rect) return { display: 'none' }
-    const pad = 6 // 窗口内边距，让高亮框比目标略大
+    const pad = 6
     switch (side) {
       case 'top':
         return { top: 0, left: 0, right: 0, height: Math.max(0, rect.top - pad) }
       case 'bottom':
         return { top: rect.bottom + pad, left: 0, right: 0, bottom: 0 }
       case 'left':
-        return { top: Math.max(0, rect.top - pad), left: 0, width: Math.max(0, rect.left - pad), height: rect.height + pad * 2 }
+        return {
+          top: Math.max(0, rect.top - pad),
+          left: 0,
+          width: Math.max(0, rect.left - pad),
+          height: rect.height + pad * 2,
+        }
       case 'right':
-        return { top: Math.max(0, rect.top - pad), left: rect.right + pad, right: 0, height: rect.height + pad * 2 }
+        return {
+          top: Math.max(0, rect.top - pad),
+          left: rect.right + pad,
+          right: 0,
+          height: rect.height + pad * 2,
+        }
       default:
         return {}
     }
@@ -107,14 +93,13 @@ export default function OnboardingGuide() {
 
   const content = (
     <>
-      {/* 遮罩层 */}
+      {/* 遮罩 + 高亮：仅在 active 且目标存在时显示 */}
       {active && rect ? (
         <div className="onboard-overlay">
           <div className="onboard-mask" style={maskStyle('top')} />
           <div className="onboard-mask" style={maskStyle('bottom')} />
           <div className="onboard-mask" style={maskStyle('left')} />
           <div className="onboard-mask" style={maskStyle('right')} />
-          {/* 高亮边框 */}
           <div
             className="onboard-highlight"
             style={{
@@ -137,11 +122,7 @@ export default function OnboardingGuide() {
             {currentStep + 1} / {totalSteps}
           </div>
           <h3 className="onboard-tooltip-title">{step.title}</h3>
-          <p className="onboard-tooltip-body">
-            {!targetPresent && (currentStep === 2 || currentStep === 3)
-              ? `比价完成后，你就可以在这里看到${currentStep === 2 ? '深度报告生成入口' : '导出按钮'}。现在先继续往下看。`
-              : step.body}
-          </p>
+          <p className="onboard-tooltip-body">{step.body}</p>
           <div className="onboard-tooltip-actions">
             <button type="button" className="onboard-btn onboard-btn--skip" onClick={skip}>
               跳过
@@ -166,8 +147,18 @@ export default function OnboardingGuide() {
         </div>
       ) : null}
 
-      {/* 右下角重放按钮：引导完成后常驻 */}
-      {!active ? (
+      {/* 等待比价完成：前两步走完后显示轻量提示，不遮罩 */}
+      {waiting ? (
+        <div className="onboard-waiting">
+          <span>完成第一次比价后，引导会自动继续</span>
+          <button type="button" className="onboard-btn onboard-btn--skip" onClick={skip}>
+            不再提示
+          </button>
+        </div>
+      ) : null}
+
+      {/* 右下角重放按钮：引导结束后常驻 */}
+      {!active && !waiting ? (
         <button
           type="button"
           className="onboard-replay"
@@ -184,7 +175,6 @@ export default function OnboardingGuide() {
   return createPortal(content, document.body)
 }
 
-// 判断气泡放在目标的哪一侧（上/下/左/右），优先放下方
 function getTooltipSide(rect) {
   if (!rect) return 'bottom'
   const spaceBelow = window.innerHeight - rect.bottom

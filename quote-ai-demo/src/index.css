@@ -1168,6 +1168,26 @@ button {
   color: var(--muted-strong);
 }
 
+/* 等待比价完成的轻量提示条 */
+.onboard-waiting {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 20px rgba(16, 24, 40, 0.12);
+  font-size: 13px;
+  color: var(--muted-strong);
+  white-space: nowrap;
+}
+
 /* 右下角重放按钮 */
 .onboard-replay {
   position: fixed;
