@@ -6,9 +6,9 @@ const { quoteAnalysisSchema } = require('./schema')
 const MAX_FILES = 3
 const MIN_FILES = 2
 const MAX_FILE_SIZE = 10 * 1024 * 1024
-const MAX_SHEETS = 5
-const MAX_ROWS_PER_SHEET = 120
-const MAX_COLUMNS_PER_SHEET = 100
+const MAX_SHEETS = 2
+const MAX_ROWS_PER_SHEET = 80
+const MAX_COLUMNS_PER_SHEET = 45
 const ALLOWED_EXTENSIONS = new Set(['xlsx'])
 
 exports.main = async (event = {}) => {
@@ -81,13 +81,14 @@ async function extractWorkbookTables(buffer) {
     .slice(0, MAX_SHEETS)
     .map((sheet) => ({
       sheetName: sheet.sheetName,
+      columns: sheet.columns,
       rows: sheet.rows,
     }))
 }
 
 function normalizeSheet(sheet) {
   const data = Array.isArray(sheet.data) ? sheet.data : []
-  const columnIndexes = getNonEmptyColumnIndexes(data).slice(0, MAX_COLUMNS_PER_SHEET)
+  const columnIndexes = getRelevantColumnIndexes(data)
   const rows = data
     .filter(hasMeaningfulCells)
     .slice(0, MAX_ROWS_PER_SHEET)
@@ -95,6 +96,7 @@ function normalizeSheet(sheet) {
 
   return {
     sheetName: sheet.sheet || 'Sheet1',
+    columns: columnIndexes.map(getColumnName),
     rows,
     nonEmptyRows: rows.length,
     nonEmptyColumns: columnIndexes.length,
@@ -102,16 +104,35 @@ function normalizeSheet(sheet) {
   }
 }
 
-function getNonEmptyColumnIndexes(rows) {
-  const indexes = new Set()
+function getColumnName(index) {
+  let column = ''
+  let cursor = index + 1
+
+  while (cursor > 0) {
+    const remainder = (cursor - 1) % 26
+    column = String.fromCharCode(65 + remainder) + column
+    cursor = Math.floor((cursor - 1) / 26)
+  }
+
+  return column
+}
+
+function getRelevantColumnIndexes(rows) {
+  const counts = new Map()
 
   rows.forEach((row) => {
     row.forEach((cell, index) => {
-      if (isMeaningfulCell(cell)) indexes.add(index)
+      if (isMeaningfulCell(cell)) {
+        counts.set(index, (counts.get(index) || 0) + 1)
+      }
     })
   })
 
-  return Array.from(indexes).sort((a, b) => a - b)
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, MAX_COLUMNS_PER_SHEET)
+    .map(([index]) => index)
+    .sort((a, b) => a - b)
 }
 
 function hasMeaningfulCells(row) {
