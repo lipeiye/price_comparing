@@ -12,6 +12,10 @@ exports.main = async (event = {}) => {
   const requestId = event.requestId || event.requestContext?.requestId || `req_${Date.now()}`
 
   try {
+    if (getRequestMethod(event) === 'OPTIONS') {
+      return response(204, {})
+    }
+
     const files = await parseIncomingFiles(event)
     validateFiles(files)
 
@@ -88,11 +92,11 @@ function normalizeCellValue(value) {
 
 async function callAi(workbooks, requestId) {
   const apiKey = process.env.AI_API_KEY
-  const model = process.env.AI_MODEL
+  const model = process.env.AI_MODEL || 'kimi-k2.7-code'
   const endpoint = resolveEndpoint()
 
-  if (!apiKey || !model || !endpoint) {
-    throw userError('真实 AI 尚未配置，缺少 AI_API_KEY、AI_MODEL 或 AI_API_ENDPOINT。', 503)
+  if (!apiKey) {
+    throw userError('真实 AI 尚未配置，缺少 AI_API_KEY。', 503)
   }
 
   const controller = new AbortController()
@@ -145,7 +149,11 @@ function resolveEndpoint() {
   if (process.env.AI_API_BASE_URL) {
     return `${process.env.AI_API_BASE_URL.replace(/\/$/, '')}/chat/completions`
   }
-  return ''
+  return 'https://api.moonshot.ai/v1/chat/completions'
+}
+
+function getRequestMethod(event) {
+  return event.httpMethod || event.requestContext?.http?.method || event.requestContext?.method || ''
 }
 
 async function parseIncomingFiles(event) {

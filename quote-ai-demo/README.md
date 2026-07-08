@@ -49,12 +49,12 @@ CloudBase 云函数位于 `cloudfunctions/analyzeQuotes/`，它会：
 
 ```env
 AI_API_KEY=
-AI_API_BASE_URL=
-AI_API_ENDPOINT=
-AI_MODEL=
+AI_API_BASE_URL=https://api.moonshot.ai/v1
+AI_API_ENDPOINT=https://api.moonshot.ai/v1/chat/completions
+AI_MODEL=kimi-k2.7-code
 ```
 
-`AI_API_ENDPOINT` 优先级高于 `AI_API_BASE_URL`。如果只设置 `AI_API_BASE_URL`，云函数会自动拼接 `/chat/completions`。
+`AI_API_ENDPOINT` 优先级高于 `AI_API_BASE_URL`。如果只设置 `AI_API_BASE_URL`，云函数会自动拼接 `/chat/completions`。如果只配置 `AI_API_KEY`，云函数会默认使用 Kimi 官方接口和 `kimi-k2.7-code` 模型。
 
 ## 部署说明
 
