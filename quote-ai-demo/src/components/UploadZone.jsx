@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { FileImage, Images, UploadCloud } from 'lucide-react'
+import { FileSpreadsheet, Images, UploadCloud } from 'lucide-react'
 import FileCard from './FileCard.jsx'
 import { buildUploadItem, validateIncomingFiles } from '../utils/fileValidation.js'
 
@@ -40,8 +40,6 @@ function UploadZone({ files, setFiles, setError, disabled }) {
 
   function removeFile(fileId) {
     setFiles((current) => {
-      const target = current.find((item) => item.id === fileId)
-      if (target) URL.revokeObjectURL(target.previewUrl)
       return current.filter((item) => item.id !== fileId)
     })
     setError('')
@@ -55,10 +53,12 @@ function UploadZone({ files, setFiles, setError, disabled }) {
 
     try {
       const demoFiles = await Promise.all(
-        ['supplier-a.png', 'supplier-b.png', 'supplier-c.png'].map(async (name) => {
+        ['supplier-a.xlsx', 'supplier-b.xlsx', 'supplier-c.xlsx'].map(async (name) => {
           const response = await fetch(`/demo/${name}`)
           const blob = await response.blob()
-          return new File([blob], name, { type: blob.type || 'image/png' })
+          return new File([blob], name, {
+            type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          })
         }),
       )
       addFiles(demoFiles)
@@ -80,18 +80,18 @@ function UploadZone({ files, setFiles, setError, disabled }) {
         <input
           ref={inputRef}
           type="file"
-          accept="image/png,image/jpeg"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           multiple
           disabled={disabled}
           onChange={(event) => addFiles(event.target.files)}
-          aria-label="选择供应商报价单图片"
+          aria-label="选择供应商 Excel 报价单"
         />
         <div className="drop-content">
           <div className="drop-icon">
             <UploadCloud size={26} />
           </div>
-          <h3>拖拽报价单图片到这里，或点击上传</h3>
-          <p>仅支持 JPG、JPEG、PNG；最多 3 份；单份不超过 10 MB。</p>
+          <h3>拖拽 Excel 报价单到这里，或点击上传</h3>
+          <p>仅支持 XLSX；最多 3 份；单份不超过 10 MB。</p>
           <div className="demo-links">
             <button
               className="demo-load-button"
@@ -102,16 +102,16 @@ function UploadZone({ files, setFiles, setError, disabled }) {
               <Images size={14} />
               载入演示文件
             </button>
-            <a className="demo-file-link" href="/demo/supplier-a.png" download>
-              <FileImage size={14} />
+            <a className="demo-file-link" href="/demo/supplier-a.xlsx" download>
+              <FileSpreadsheet size={14} />
               示例 A
             </a>
-            <a className="demo-file-link" href="/demo/supplier-b.png" download>
-              <FileImage size={14} />
+            <a className="demo-file-link" href="/demo/supplier-b.xlsx" download>
+              <FileSpreadsheet size={14} />
               示例 B
             </a>
-            <a className="demo-file-link" href="/demo/supplier-c.png" download>
-              <FileImage size={14} />
+            <a className="demo-file-link" href="/demo/supplier-c.xlsx" download>
+              <FileSpreadsheet size={14} />
               示例 C
             </a>
           </div>

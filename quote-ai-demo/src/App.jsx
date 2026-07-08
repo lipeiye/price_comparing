@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { BrainCircuit, CheckCircle2, FileSearch, RotateCcw } from 'lucide-react'
 import Header from './components/Header.jsx'
 import UploadZone from './components/UploadZone.jsx'
@@ -11,7 +11,7 @@ import { analyzeQuotes } from './services/analyzeQuotes.js'
 import { formatFileSize } from './utils/formatters.js'
 
 const progressSteps = [
-  '正在识别报价单',
+  '正在读取 Excel 工作表',
   '正在统一商品名称与规格',
   '正在检测价格和条款异常',
   '正在生成采购建议',
@@ -31,15 +31,9 @@ function App() {
 
   const canAnalyze = files.length >= 2 && !isAnalyzing
 
-  useEffect(() => {
-    return () => {
-      files.forEach((item) => URL.revokeObjectURL(item.previewUrl))
-    }
-  }, [files])
-
   async function handleAnalyze() {
     if (!canAnalyze) {
-      setError('请至少上传 2 份供应商报价单后再开始分析。')
+      setError('请至少上传 2 份供应商 Excel 报价单后再开始分析。')
       return
     }
 
@@ -66,7 +60,6 @@ function App() {
   }
 
   function handleReset() {
-    files.forEach((item) => URL.revokeObjectURL(item.previewUrl))
     setFiles([])
     setError('')
     setResult(null)
@@ -183,8 +176,8 @@ function App() {
           <section className="empty-state">
             <FileSearch size={28} />
             <div>
-              <h2>上传 2 到 3 份报价单后开始分析</h2>
-              <p>系统会展示识别过程，并生成比价表、异常提示和采购建议。</p>
+              <h2>上传 2 到 3 份 Excel 报价单后开始分析</h2>
+              <p>系统会读取表格内容，并生成比价表、异常提示和采购建议。</p>
             </div>
           </section>
         )}

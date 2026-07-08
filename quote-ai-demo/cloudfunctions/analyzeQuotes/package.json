@@ -1,7 +1,9 @@
 {
   "name": "analyze-quotes",
-  "version": "0.1.0",
-  "type": "module",
+  "version": "0.2.0",
   "main": "index.js",
-  "dependencies": {}
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "read-excel-file": "^9.2.0"
+  }
 }

@@ -1,14 +1,17 @@
-import { FileImage, Trash2 } from 'lucide-react'
+import { FileSpreadsheet, Trash2 } from 'lucide-react'
 import { formatFileSize } from '../utils/formatters.js'
 
 function FileCard({ file, onRemove, disabled }) {
   return (
     <article className="file-card">
-      <img className="file-preview" src={file.previewUrl} alt={`${file.name} 预览`} />
+      <div className="file-preview spreadsheet-preview" aria-hidden="true">
+        <FileSpreadsheet size={30} />
+        <span>Excel</span>
+      </div>
       <div className="file-info">
         <strong title={file.name}>{file.name}</strong>
         <div className="file-meta">
-          <FileImage size={14} />
+          <FileSpreadsheet size={14} />
           <span>{formatFileSize(file.size)}</span>
         </div>
       </div>

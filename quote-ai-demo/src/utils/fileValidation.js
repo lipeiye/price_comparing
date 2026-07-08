@@ -1,6 +1,9 @@
 const MAX_FILES = 3
 const MAX_FILE_SIZE = 10 * 1024 * 1024
-const ALLOWED_TYPES = new Set(['image/png', 'image/jpeg'])
+const ALLOWED_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+])
+const ALLOWED_EXTENSIONS = new Set(['xlsx'])
 
 export function buildUploadItem(file) {
   return {
@@ -9,7 +12,6 @@ export function buildUploadItem(file) {
     name: file.name,
     size: file.size,
     type: file.type,
-    previewUrl: URL.createObjectURL(file),
   }
 }
 
@@ -24,8 +26,8 @@ export function validateIncomingFiles(incomingFiles, currentFiles) {
       break
     }
 
-    if (!ALLOWED_TYPES.has(file.type)) {
-      errors.push(`${file.name} 不是 JPG、JPEG 或 PNG 图片，已被拒绝。`)
+    if (!isExcelFile(file)) {
+      errors.push(`${file.name} 不是 XLSX Excel 文件，已被拒绝。`)
       continue
     }
 
@@ -49,4 +51,9 @@ export function validateIncomingFiles(incomingFiles, currentFiles) {
 
 function getFileKey(file) {
   return `${file.name}-${file.size}-${file.type}`
+}
+
+function isExcelFile(file) {
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  return ALLOWED_EXTENSIONS.has(extension) || ALLOWED_TYPES.has(file.type)
 }

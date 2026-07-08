@@ -16,7 +16,7 @@ function Header() {
 
         <div className="header-meta">
           <span>桌面端优先</span>
-          <span>2-3 份报价单</span>
+          <span>2-3 份 Excel 报价单</span>
           <span className="success-badge">
             <ShieldCheck size={16} />
             Mock 兜底

@@ -317,9 +317,22 @@ button {
   height: 88px;
   flex: 0 0 auto;
   border-radius: 6px;
-  object-fit: cover;
   border: 1px solid var(--border);
-  background: var(--surface-soft);
+  background: #eef8f2;
+}
+
+.spreadsheet-preview {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  color: var(--green);
+}
+
+.spreadsheet-preview span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .file-info {
