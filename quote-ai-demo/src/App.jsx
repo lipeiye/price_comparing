@@ -7,14 +7,14 @@ import AnalysisProgress from './components/AnalysisProgress.jsx'
 import ComparisonTable from './components/ComparisonTable.jsx'
 import WarningCard from './components/WarningCard.jsx'
 import RecommendationPanel from './components/RecommendationPanel.jsx'
-import { analyzeQuotes } from './services/analyzeQuotes.js'
+import { analyzeQuotes, isMockAnalysisMode } from './services/analyzeQuotes.js'
 import { formatFileSize } from './utils/formatters.js'
 
 const progressSteps = [
   '正在读取 Excel 工作表',
   '正在统一商品名称与规格',
   '正在检测价格和条款异常',
-  '正在生成采购建议',
+  '正在调用 Kimi AI 生成采购建议',
 ]
 
 function App() {
@@ -79,7 +79,9 @@ function App() {
                 <p className="eyebrow">报价单上传</p>
                 <h2>供应商文件</h2>
               </div>
-              <span className="status-pill">Mock 演示模式</span>
+              <span className="status-pill">
+                {isMockAnalysisMode ? '本地 Mock 模式' : '真实 AI 分析'}
+              </span>
             </div>
 
             <UploadZone
@@ -177,7 +179,7 @@ function App() {
             <FileSearch size={28} />
             <div>
               <h2>上传 2 到 3 份 Excel 报价单后开始分析</h2>
-              <p>系统会读取表格内容，并生成比价表、异常提示和采购建议。</p>
+              <p>系统会读取表格内容，通过云函数调用 Kimi AI，并生成比价表、异常提示和采购建议。</p>
             </div>
           </section>
         )}

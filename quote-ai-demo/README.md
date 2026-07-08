@@ -1,6 +1,6 @@
 # 智采 AI 报价比价 Demo
 
-企业采购报价比价网站 Demo。本地第一阶段使用 Mock 数据，支持上传 2-3 份供应商 Excel 报价单，展示分析过程、结构化比价表、异常项和 AI 采购建议。
+企业采购报价比价网站。支持上传 2-3 份供应商 Excel 报价单，通过 CloudBase 云函数调用 Kimi AI，展示分析过程、结构化比价表、异常项和 AI 采购建议。
 
 ## 本地运行
 
@@ -17,16 +17,16 @@ npm run build
 
 构建产物位于 `dist/`。部署静态托管时请上传 `dist` 目录内部内容，确保托管根目录直接包含 `index.html` 和 `assets/`。
 
-## 演示模式
+## 本地 Mock 模式
 
-默认启用 Mock：
+本地开发默认启用 Mock：
 
 ```env
 VITE_USE_MOCK=true
 VITE_ANALYZE_API_URL=
 ```
 
-真实 AI 接口必须由后端或 CloudBase 云函数调用，不能把 API Key 写入前端。
+真实 AI 接口必须由后端或 CloudBase 云函数调用，不能把 API Key 写入前端。生产环境 `.env.production` 已配置为调用 CloudBase HTTP 网关。
 
 ## 真实 AI 接入准备
 
@@ -60,13 +60,41 @@ AI_MODEL=kimi-k2.7-code
 
 当前推荐部署到腾讯云 CloudBase 静态网站托管。根据腾讯云 2026 年官方文档，CloudBase 静态网站托管支持 HTML/CSS/JavaScript 静态资源部署，并内置 HTTPS；默认首页文档为 `index.html`；默认域名为 `*.tcloudbaseapp.com`，主要用于开发和测试。
 
-部署前构建：
+### 一键 CLI 部署
+
+本地登录过 CloudBase CLI 后，可以直接运行：
+
+```bash
+npm run deploy:static
+```
+
+这条命令会自动构建，并执行：
+
+```bash
+tcb hosting deploy ./dist / -e price-comparing-demo-d2adc62c70c
+```
+
+### 手动 ZIP 部署
+
+如果仍然使用控制台上传，部署前构建：
 
 ```bash
 npm run build
 ```
 
 静态托管上传时请上传 `dist/` 内部内容，不要把整个 `dist` 目录嵌套为一层。托管根目录应直接包含 `index.html` 和 `assets/`。
+
+### Git 仓库部署
+
+更省心的方式是使用 CloudBase 控制台的 Git 仓库部署，把 GitHub 仓库绑定到静态网站托管：
+
+- 代码目录：`quote-ai-demo`
+- 安装命令：`npm install`
+- 构建命令：`npm run build`
+- 构建产物目录：`./dist`
+- 部署路径：`/`
+
+这样以后改完代码 push 到 GitHub 后，在 CloudBase 控制台触发 Git 部署即可，不需要手动上传 zip。
 
 ## Demo 验收点
 
@@ -76,7 +104,7 @@ npm run build
 - 非 XLSX 文件被拒绝
 - 可删除文件并更新状态
 - 分析过程逐步展示
-- Mock 结果可展示比价表、异常和建议
+- 真实 AI 失败时显示错误提示，不静默切换 Mock 结果
 - `npm run build` 成功
 
 ## 30 秒演示脚本

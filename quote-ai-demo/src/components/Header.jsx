@@ -1,4 +1,5 @@
 import { Building2, ShieldCheck } from 'lucide-react'
+import { isMockAnalysisMode } from '../services/analyzeQuotes.js'
 
 function Header() {
   return (
@@ -10,7 +11,7 @@ function Header() {
           </div>
           <div>
             <h1>智采 AI 报价比价</h1>
-            <p>内部演示版 · 请勿上传真实敏感采购数据</p>
+            <p>Excel 报价单智能比价 · Kimi AI 实时分析</p>
           </div>
         </div>
 
@@ -19,7 +20,7 @@ function Header() {
           <span>2-3 份 Excel 报价单</span>
           <span className="success-badge">
             <ShieldCheck size={16} />
-            Mock 兜底
+            {isMockAnalysisMode ? '本地 Mock 模式' : '真实 AI 已接入'}
           </span>
         </div>
       </div>
