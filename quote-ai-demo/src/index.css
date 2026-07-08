@@ -79,8 +79,7 @@ button {
 .file-meta,
 .progress-step,
 .recommendation-head,
-.table-note,
-.demo-file-link {
+.table-note {
   display: flex;
   align-items: center;
 }
@@ -257,42 +256,6 @@ button {
 .helper-text {
   margin: 0;
   font-size: 13px;
-}
-
-.demo-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
-  justify-content: center;
-}
-
-.demo-file-link,
-.demo-load-button {
-  gap: 6px;
-  padding: 6px 9px;
-  color: var(--muted-strong);
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  text-decoration: none;
-  font-size: 12px;
-  pointer-events: auto;
-}
-
-.demo-load-button {
-  cursor: pointer;
-}
-
-.demo-load-button:hover:not(:disabled),
-.demo-file-link:hover {
-  border-color: #98bdfb;
-  color: var(--blue);
-}
-
-.demo-load-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
 }
 
 .file-grid {

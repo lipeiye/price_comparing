@@ -34,11 +34,12 @@ exports.main = async (event = {}) => {
       ...aiResult,
     })
   } catch (error) {
-    console.error(JSON.stringify({ requestId, message: error.message, code: error.code }))
+    console.error(JSON.stringify({ requestId, message: error.message, code: error.code, stack: error.stack }))
     return response(error.statusCode || 500, {
       success: false,
       requestId,
       message: error.userMessage || 'Excel 报价单分析失败，请检查文件格式后重试。',
+      detail: error.exposeDetail ? error.message : undefined,
     })
   }
 }
@@ -158,9 +159,9 @@ function getRequestMethod(event) {
 
 async function parseIncomingFiles(event) {
   const contentType = event.headers?.['content-type'] || event.headers?.['Content-Type'] || ''
-  const body = Buffer.from(event.body || '', event.isBase64Encoded ? 'base64' : 'utf8')
 
   if (contentType.includes('multipart/form-data')) {
+    const body = getRequestBodyBuffer(event)
     return parseMultipart(body, contentType)
   }
 
@@ -171,7 +172,22 @@ async function parseIncomingFiles(event) {
     }))
   }
 
-  throw userError('请使用 multipart/form-data 上传 Excel 文件。', 400)
+  const error = userError(
+    `请使用 multipart/form-data 上传 Excel 文件。当前 content-type: ${contentType || '空'}`,
+    400,
+  )
+  error.exposeDetail = true
+  throw error
+}
+
+function getRequestBodyBuffer(event) {
+  const body = event.rawBody || event.body || ''
+
+  if (Buffer.isBuffer(body)) return body
+  if (body instanceof Uint8Array) return Buffer.from(body)
+  if (typeof body === 'object') return Buffer.from(JSON.stringify(body), 'utf8')
+
+  return Buffer.from(body, event.isBase64Encoded ? 'base64' : 'utf8')
 }
 
 function parseMultipart(body, contentType) {
@@ -182,18 +198,24 @@ function parseMultipart(body, contentType) {
     busboy.on('file', (_fieldName, stream, info) => {
       const chunks = []
       let size = 0
+      let sizeRejected = false
 
       stream.on('data', (chunk) => {
         size += chunk.length
         if (size > MAX_FILE_SIZE) {
+          sizeRejected = true
           stream.resume()
-          reject(userError(`${info.filename} 超过 10 MB。`, 400))
           return
         }
         chunks.push(chunk)
       })
 
       stream.on('end', () => {
+        if (sizeRejected) {
+          reject(userError(`${info.filename} 超过 10 MB。`, 400))
+          return
+        }
+
         files.push({
           filename: info.filename,
           mimeType: info.mimeType,
@@ -203,7 +225,16 @@ function parseMultipart(body, contentType) {
     })
 
     busboy.on('error', reject)
-    busboy.on('finish', () => resolve(files))
+    busboy.on('finish', () => {
+      if (files.length === 0) {
+        const error = userError('没有从 multipart/form-data 中读取到 Excel 文件。', 400)
+        error.exposeDetail = true
+        reject(error)
+        return
+      }
+
+      resolve(files)
+    })
     busboy.end(body)
   })
 }

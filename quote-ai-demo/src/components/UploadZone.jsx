@@ -1,11 +1,10 @@
 import { useRef, useState } from 'react'
-import { FileSpreadsheet, Images, UploadCloud } from 'lucide-react'
+import { UploadCloud } from 'lucide-react'
 import FileCard from './FileCard.jsx'
 import { buildUploadItem, validateIncomingFiles } from '../utils/fileValidation.js'
 
 function UploadZone({ files, setFiles, setError, disabled }) {
   const [isDragging, setIsDragging] = useState(false)
-  const [isLoadingDemo, setIsLoadingDemo] = useState(false)
   const inputRef = useRef(null)
 
   function addFiles(fileList) {
@@ -45,30 +44,6 @@ function UploadZone({ files, setFiles, setError, disabled }) {
     setError('')
   }
 
-  async function loadDemoFiles() {
-    if (disabled || isLoadingDemo) return
-
-    setIsLoadingDemo(true)
-    setError('')
-
-    try {
-      const demoFiles = await Promise.all(
-        ['supplier-a.xlsx', 'supplier-b.xlsx', 'supplier-c.xlsx'].map(async (name) => {
-          const response = await fetch(`/demo/${name}`)
-          const blob = await response.blob()
-          return new File([blob], name, {
-            type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          })
-        }),
-      )
-      addFiles(demoFiles)
-    } catch {
-      setError('演示报价单加载失败，请刷新页面后重试。')
-    } finally {
-      setIsLoadingDemo(false)
-    }
-  }
-
   return (
     <div>
       <div
@@ -92,29 +67,6 @@ function UploadZone({ files, setFiles, setError, disabled }) {
           </div>
           <h3>拖拽 Excel 报价单到这里，或点击上传</h3>
           <p>仅支持 XLSX；最多 3 份；单份不超过 10 MB。</p>
-          <div className="demo-links">
-            <button
-              className="demo-load-button"
-              type="button"
-              onClick={loadDemoFiles}
-              disabled={disabled || isLoadingDemo || files.length >= 3}
-            >
-              <Images size={14} />
-              载入演示文件
-            </button>
-            <a className="demo-file-link" href="/demo/supplier-a.xlsx" download>
-              <FileSpreadsheet size={14} />
-              示例 A
-            </a>
-            <a className="demo-file-link" href="/demo/supplier-b.xlsx" download>
-              <FileSpreadsheet size={14} />
-              示例 B
-            </a>
-            <a className="demo-file-link" href="/demo/supplier-c.xlsx" download>
-              <FileSpreadsheet size={14} />
-              示例 C
-            </a>
-          </div>
         </div>
       </div>
 

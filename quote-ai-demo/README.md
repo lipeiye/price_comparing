@@ -66,7 +66,7 @@ AI_MODEL=kimi-k2.7-code
 npm run build
 ```
 
-静态托管上传时请上传 `dist/` 内部内容，不要把整个 `dist` 目录嵌套为一层。托管根目录应直接包含 `index.html`、`assets/` 和 `demo/`。
+静态托管上传时请上传 `dist/` 内部内容，不要把整个 `dist` 目录嵌套为一层。托管根目录应直接包含 `index.html` 和 `assets/`。
 
 ## Demo 验收点
 
