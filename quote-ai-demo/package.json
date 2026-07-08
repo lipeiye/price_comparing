@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "deploy:static": "npm run build && npx --yes @cloudbase/cli hosting deploy ./dist / -e price-comparing-demo-d2adc62c70c"
+    "deploy:static": "npm run build && npx --yes -p @cloudbase/cli tcb hosting deploy ./dist / -e price-comparing-demo-d2adc62c70c"
   },
   "dependencies": {
     "lucide-react": "^1.23.0",
