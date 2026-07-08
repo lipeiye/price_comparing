@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { BrainCircuit, CheckCircle2, FileSearch, RotateCcw } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { BrainCircuit, CheckCircle2, FileSearch, RotateCcw, Sparkles, Loader2 } from 'lucide-react'
 import Header from './components/Header.jsx'
 import UploadZone from './components/UploadZone.jsx'
 import ErrorBanner from './components/ErrorBanner.jsx'
@@ -7,7 +7,12 @@ import AnalysisProgress from './components/AnalysisProgress.jsx'
 import ComparisonTable from './components/ComparisonTable.jsx'
 import WarningCard from './components/WarningCard.jsx'
 import RecommendationPanel from './components/RecommendationPanel.jsx'
+import ReportPanel from './components/ReportPanel.jsx'
 import { analyzeQuotes, isMockAnalysisMode } from './services/analyzeQuotes.js'
+import {
+  generateReport,
+  loadCachedReport,
+} from './services/generateReport.js'
 import { formatFileSize } from './utils/formatters.js'
 
 const progressSteps = [
@@ -23,6 +28,35 @@ function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [activeStep, setActiveStep] = useState(-1)
   const [result, setResult] = useState(null)
+  const [elapsedMs, setElapsedMs] = useState(0)
+
+  // 详细报告相关状态
+  const [report, setReport] = useState(null)
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false)
+  const [reportError, setReportError] = useState('')
+  const [reportElapsedMs, setReportElapsedMs] = useState(0)
+
+  // 持有最近一次分析使用的 workbooks，供详细报告接口复用
+  const workbooksRef = useRef(null)
+  const analyzedFilesRef = useRef([])
+
+  // 快速比价等待计时
+  useEffect(() => {
+    if (!isAnalyzing) return undefined
+    const start = Date.now()
+    setElapsedMs(0)
+    const id = setInterval(() => setElapsedMs(Date.now() - start), 250)
+    return () => clearInterval(id)
+  }, [isAnalyzing])
+
+  // 详细报告等待计时
+  useEffect(() => {
+    if (!isGeneratingReport) return undefined
+    const start = Date.now()
+    setReportElapsedMs(0)
+    const id = setInterval(() => setReportElapsedMs(Date.now() - start), 250)
+    return () => clearInterval(id)
+  }, [isGeneratingReport])
 
   const totalSize = useMemo(
     () => files.reduce((sum, item) => sum + item.size, 0),
@@ -39,6 +73,8 @@ function App() {
 
     setError('')
     setResult(null)
+    setReport(null)
+    setReportError('')
     setIsAnalyzing(true)
     setActiveStep(0)
 
@@ -48,14 +84,39 @@ function App() {
         await new Promise((resolve) => setTimeout(resolve, index === 0 ? 450 : 520))
       }
 
-      const analysisResult = await analyzeQuotes(files)
+      const { result: analysisResult, workbooks } = await analyzeQuotes(files)
       setResult(analysisResult)
+      workbooksRef.current = workbooks
+      analyzedFilesRef.current = files
       setActiveStep(progressSteps.length)
+
+      // 分析完成后，尝试恢复同份文件的历史报告缓存
+      const cached = loadCachedReport(files)
+      if (cached) setReport(cached)
     } catch (analysisError) {
       setError(analysisError.message || '分析失败，请删除文件后重新上传再试。')
       setActiveStep(-1)
     } finally {
       setIsAnalyzing(false)
+    }
+  }
+
+  async function handleGenerateReport() {
+    if (!result || !workbooksRef.current) {
+      setReportError('请先完成快速比价，再生成详细报告。')
+      return
+    }
+    setReportError('')
+    setIsGeneratingReport(true)
+    setReport(null)
+
+    try {
+      const reportData = await generateReport(result, workbooksRef.current, analyzedFilesRef.current)
+      setReport(reportData)
+    } catch (reportError) {
+      setReportError(reportError.message || '详细报告生成失败，请稍后重试。')
+    } finally {
+      setIsGeneratingReport(false)
     }
   }
 
@@ -65,6 +126,11 @@ function App() {
     setResult(null)
     setActiveStep(-1)
     setIsAnalyzing(false)
+    setReport(null)
+    setReportError('')
+    setIsGeneratingReport(false)
+    workbooksRef.current = null
+    analyzedFilesRef.current = []
   }
 
   return (
@@ -138,6 +204,7 @@ function App() {
               steps={progressSteps}
               activeStep={activeStep}
               isAnalyzing={isAnalyzing}
+              elapsedMs={elapsedMs}
             />
           </div>
         </section>
@@ -150,9 +217,43 @@ function App() {
                   <p className="eyebrow">结构化结果</p>
                   <h2>报价比价表</h2>
                 </div>
-                <span className="status-pill">{result.items.length} 个商品</span>
+                <div className="panel-heading-right">
+                  <span className="status-pill">{result.items.length} 个商品</span>
+                </div>
               </div>
               <ComparisonTable result={result} />
+
+              <div className="report-trigger">
+                <button
+                  type="button"
+                  className="report-button"
+                  onClick={handleGenerateReport}
+                  disabled={isGeneratingReport}
+                >
+                  {isGeneratingReport ? (
+                    <>
+                      <Loader2 className="spinner" size={18} />
+                      正在生成详细分析报告…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={18} />
+                      生成详细分析报告（深度 AI）
+                    </>
+                  )}
+                </button>
+                {isGeneratingReport ? (
+                  <span className="report-timer">
+                    已用时 {Math.floor(reportElapsedMs / 1000)}s · 推理模型较慢，请耐心等待
+                  </span>
+                ) : (
+                  <span className="report-hint">
+                    使用更强模型做多维深度分析，可导出 Word/PDF
+                  </span>
+                )}
+              </div>
+
+              <ErrorBanner message={reportError} />
             </div>
 
             <aside className="insight-column">
@@ -183,6 +284,17 @@ function App() {
             </div>
           </section>
         )}
+
+        {report ? (
+          <section className="report-section-wrapper">
+            <ReportPanel
+              report={report.report}
+              suppliers={result?.suppliers || []}
+              items={result?.items || []}
+              generatedAt={report.generatedAt}
+            />
+          </section>
+        ) : null}
       </main>
     </div>
   )

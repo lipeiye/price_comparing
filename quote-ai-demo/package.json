@@ -11,9 +11,12 @@
     "deploy:static": "npm run build && npx --yes -p @cloudbase/cli tcb hosting deploy ./dist / -e price-comparing-demo-d2adc62c70c"
   },
   "dependencies": {
+    "docx": "^9.7.1",
+    "file-saver": "^2.0.5",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "read-excel-file": "^9.2.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
