@@ -31,7 +31,54 @@ const FIELD_HEADERS = {
   toolingExisting: ['tooling exisiting yes/ no', 'tooling exisiting', 'tooling existing'],
   toolingCost: ['tooling cost'],
   quantity: ['1st order quantity', 'order quantity'],
+
+  // 决策关键规格。它们由代码逐项比对，避免把「是否同规格」完全交给 AI 猜。
+  remoteIncluded: ['remote control include'],
+  specificSpecification: ['specific specification'],
+  mainMaterial: ['main material used'],
+  length: ['l'],
+  width: ['w'],
+  depth: ['d'],
+  height: ['h'],
+  lampColor: ['lamp finished'],
+  safetyClass: ['safety class'],
+  ipClass: ['ip class'],
+  driverSpecification: ['driver specification'],
+  voltage: ['voltage'],
+  wattage: ['wattage'],
+  kelvin: ['kelvin'],
+  lumen: ['led module'],
+  cri: ['cri'],
+  ceLvd: ['ce-lvd'],
+  emc: ['emc'],
+  erp: ['erp'],
+  rohs: ['rohs'],
+  reach: ['reach'],
 }
+
+const SPEC_AUDIT_FIELDS = [
+  ['remoteIncluded', '遥控配置'],
+  ['specificSpecification', '指定功能'],
+  ['mainMaterial', '主材'],
+  ['length', '长度'],
+  ['width', '宽度'],
+  ['depth', '深度'],
+  ['height', '高度'],
+  ['lampColor', '外观颜色'],
+  ['safetyClass', '安全等级'],
+  ['ipClass', 'IP 等级'],
+  ['driverSpecification', '驱动规格'],
+  ['voltage', '电压'],
+  ['wattage', '功率'],
+  ['kelvin', '色温'],
+  ['lumen', '流明'],
+  ['cri', '显色指数'],
+  ['ceLvd', 'CE-LVD'],
+  ['emc', 'EMC'],
+  ['erp', 'ERP'],
+  ['rohs', 'ROHS'],
+  ['reach', 'REACH'],
+]
 
 // 价格相关字段（用于界定"价格区域"和成本拆分）
 const PRICE_FIELDS = [
@@ -179,6 +226,13 @@ function extractQuoteRows(workbook) {
       projectKey: canonicalProjectKey(projectNo),
       name: columns.itemName >= 0 ? String(row[columns.itemName] || '').trim() : '',
       functionDesc: columns.functionDesc >= 0 ? String(row[columns.functionDesc] || '').trim() : '',
+      quantity: columns.quantity >= 0 ? parsePrice(row[columns.quantity]) : null,
+      specs: Object.fromEntries(
+        SPEC_AUDIT_FIELDS.map(([key]) => [
+          key,
+          columns[key] >= 0 && row[columns[key]] != null ? String(row[columns[key]]).trim() : '',
+        ]),
+      ),
       cost: {
         rawLamp: columns.rawLamp >= 0 ? parsePrice(row[columns.rawLamp]) : null,
         driver: columns.driver >= 0 ? parsePrice(row[columns.driver]) : null,
@@ -302,6 +356,12 @@ function alignQuotes(workbooks) {
         unitPrice: matched.totalPrice,
         totalPrice: matched.totalPrice,
         costBreakdown: matched.cost,
+        firstOrderQuantity: matched.quantity,
+        firstOrderAmount:
+          matched.totalPrice != null && matched.quantity != null
+            ? matched.totalPrice * matched.quantity
+            : null,
+        specs: matched.specs,
         matched: true,
         missing: false,
         ambiguous: matched.totalAmbiguous,
@@ -336,6 +396,7 @@ function alignQuotes(workbooks) {
   })
 
   const warnings = buildWarnings(suppliers, items)
+  const procurementSummary = buildProcurementSummary(suppliers, items)
 
   // 清理内部字段，不外泄
   const cleanSuppliers = suppliers.map((sup) => ({
@@ -347,7 +408,13 @@ function alignQuotes(workbooks) {
     itemCount: sup.quoteRows.length,
   }))
 
-  return { suppliers: cleanSuppliers, items, warnings, detectedColumns: suppliers.map((s) => s.detectedColumns) }
+  return {
+    suppliers: cleanSuppliers,
+    items,
+    warnings,
+    procurementSummary,
+    detectedColumns: suppliers.map((s) => s.detectedColumns),
+  }
 }
 
 function inferSupplierName(workbook) {
@@ -438,7 +505,133 @@ function buildWarnings(suppliers, items) {
     }
   }
 
+  // 5. 关键规格差异：只比较会影响采购判断的字段，最多展开 8 项，避免异常区淹没价格结论。
+  const specIssues = items
+    .map((item) => ({ item, differences: findSpecDifferences(item, suppliers) }))
+    .filter(({ differences }) => differences.length > 0)
+
+  for (const { item, differences } of specIssues.slice(0, 8)) {
+    const details = differences
+      .slice(0, 3)
+      .map((diff) => `${diff.label}：${diff.values.join('；')}`)
+      .join('。')
+    push(
+      'SPEC_MISMATCH',
+      'high',
+      `${item.projectNo} 关键规格不一致`,
+      `${details}。同规格未确认前，不应仅按最低价下单。`,
+    )
+  }
+  if (specIssues.length > 8) {
+    push(
+      'SPEC_MISMATCH',
+      'medium',
+      `另有 ${specIssues.length - 8} 项规格差异未展开`,
+      '请在导出的比价 Excel 中核实尺寸、材质、功率、光效与认证后再决定供应商。',
+    )
+  }
+
   return warnings
+}
+
+function findSpecDifferences(item, suppliers) {
+  const results = []
+  for (const [key, label] of SPEC_AUDIT_FIELDS) {
+    const entries = item.quotes
+      .filter((quote) => quote.matched)
+      .map((quote) => ({
+        supplier: suppliers.find((supplier) => supplier.id === quote.supplierId)?.name || '供应商',
+        value: quote.specs?.[key] || '',
+      }))
+      .filter((entry) => hasComparableSpecValue(entry.value))
+
+    const uniqueValues = new Set(entries.map((entry) => normalizeSpecValue(entry.value)))
+    if (uniqueValues.size < 2) continue
+
+    results.push({
+      key,
+      label,
+      values: entries.map((entry) => `${entry.supplier}「${shortSpecValue(entry.value)}」`),
+    })
+  }
+  return results
+}
+
+function hasComparableSpecValue(value) {
+  return Boolean(normalizeSpecValue(value))
+}
+
+function normalizeSpecValue(value) {
+  const text = String(value == null ? '' : value)
+    .toLowerCase()
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return /^(n\/?a|na|\-|\/|无)$/i.test(text) ? '' : text
+}
+
+function shortSpecValue(value) {
+  return String(value).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 44)
+}
+
+function buildProcurementSummary(suppliers, items) {
+  const supplierTotals = suppliers.map((supplier) => {
+    let quotedItems = 0
+    let knownAmountItems = 0
+    let knownFirstOrderAmount = 0
+    let unitPriceWins = 0
+
+    for (const item of items) {
+      const quote = item.quotes.find((entry) => entry.supplierId === supplier.id)
+      if (quote?.matched && quote.totalPrice != null) quotedItems += 1
+      if (quote?.firstOrderAmount != null) {
+        knownAmountItems += 1
+        knownFirstOrderAmount += quote.firstOrderAmount
+      }
+      if (quote?.matched && quote.totalPrice != null && quote.totalPrice === item.lowestPrice) {
+        unitPriceWins += 1
+      }
+    }
+
+    const toolingTotal = supplier.tooling.reduce((sum, tooling) => sum + (tooling.price || 0), 0)
+    return {
+      supplierId: supplier.id,
+      quotedItems,
+      missingItems: items.length - quotedItems,
+      knownAmountItems,
+      missingQuantityItems: quotedItems - knownAmountItems,
+      knownFirstOrderAmount,
+      toolingTotal,
+      knownFirstOrderTotal: knownFirstOrderAmount + toolingTotal,
+      unitPriceWins,
+    }
+  })
+
+  // 只有覆盖所有项目且有可计算的首单金额，才进入「首单总额」排序。
+  const fullyQuotedTotals = supplierTotals
+    .filter((summary) => summary.missingItems === 0 && summary.knownAmountItems > 0)
+  const sharedKnownAmountItems = fullyQuotedTotals.length > 0
+    ? Math.min(...fullyQuotedTotals.map((summary) => summary.knownAmountItems))
+    : 0
+  const comparableTotals = fullyQuotedTotals
+    .filter((summary) => summary.knownAmountItems === sharedKnownAmountItems)
+    .slice()
+    .sort((a, b) => a.knownFirstOrderTotal - b.knownFirstOrderTotal)
+
+  const priceLeader = supplierTotals
+    .slice()
+    .sort((a, b) => b.unitPriceWins - a.unitPriceWins || a.missingItems - b.missingItems)[0] || null
+  const orderLeader = comparableTotals.length >= 2 ? comparableTotals[0] : null
+  const runnerUp = comparableTotals.length >= 2 ? comparableTotals[1] : null
+
+  return {
+    totalItems: items.length,
+    priceLeaderSupplierId: priceLeader?.supplierId || null,
+    orderLeaderSupplierId: orderLeader?.supplierId || null,
+    knownOrderSavings:
+      orderLeader && runnerUp ? runnerUp.knownFirstOrderTotal - orderLeader.knownFirstOrderTotal : null,
+    supplierTotals,
+  }
 }
 
 module.exports = {

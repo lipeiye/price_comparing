@@ -8,6 +8,7 @@ const crypto = require('crypto')
 const COLLECTION = 'quote_cache'
 const TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 天
 const DOC_SIZE_SOFT_LIMIT = 900 * 1024 // 文档建议 < 1MB，超限只存 AI 字段
+const REPORT_CACHE_VERSION = 'v4-bilingual'
 
 let dbReady = null
 
@@ -100,9 +101,11 @@ async function saveAnalyzeResult(contentHash, payload) {
       items: payload.items || [],
       warnings: payload.warnings || [],
       summary: payload.summary || { zh: '', en: '' },
+      procurementSummary: payload.procurementSummary || null,
       // 保留已有报告，避免只重跑比价时丢掉
       report: existing?.report || null,
       reportGeneratedAt: existing?.reportGeneratedAt || null,
+      reportCacheVersion: existing?.reportCacheVersion || null,
       rawWorkbooks: payload.rawWorkbooks || existing?.rawWorkbooks || null,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
@@ -165,6 +168,10 @@ async function saveReport(contentHash, report, generatedAt) {
 }
 
 function toAnalyzeResponse(doc, { requestId, cacheHit }) {
+  const cachedReport = isCurrentBilingualReport(doc)
+    ? { report: doc.report, generatedAt: doc.reportGeneratedAt || null }
+    : null
+
   return {
     success: true,
     requestId,
@@ -174,11 +181,22 @@ function toAnalyzeResponse(doc, { requestId, cacheHit }) {
     items: doc.items || [],
     warnings: doc.warnings || [],
     summary: doc.summary || { zh: '', en: '' },
-    // 若服务端已有报告，一并返回，前端可直接展示
-    cachedReport: doc.report
-      ? { report: doc.report, generatedAt: doc.reportGeneratedAt || null }
-      : null,
+    procurementSummary: doc.procurementSummary || null,
+    // 旧版中文长报告不能作为英文报告展示，需由 generateReport 自动重建。
+    cachedReport,
   }
+}
+
+function isCurrentBilingualReport(doc) {
+  const report = doc?.report
+  return Boolean(
+    doc?.reportCacheVersion === REPORT_CACHE_VERSION &&
+      report &&
+      typeof report === 'object' &&
+      report.verdict &&
+      typeof report.verdict.zh === 'string' &&
+      typeof report.verdict.en === 'string',
+  )
 }
 
 module.exports = {

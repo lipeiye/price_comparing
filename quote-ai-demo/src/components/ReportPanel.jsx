@@ -1,15 +1,78 @@
-import { FileSpreadsheet, FileType, AlertTriangle, Target, ListOrdered, GitCompare } from 'lucide-react'
-import { formatPrice } from '../utils/formatters.js'
+import { useState } from 'react'
+import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  FileSpreadsheet,
+  FileType,
+  ListOrdered,
+  MoveHorizontal,
+  Target,
+} from 'lucide-react'
 import { asBilingual, hasBilingualText } from '../utils/bilingual.js'
 
 async function getExporters() {
   return import('../utils/exportReport.js')
 }
 
-// 精简双语报告：表格为主，禁止七章长文。比价矩阵直接用快速比价的 items。
-function ReportPanel({ report, suppliers, items, generatedAt }) {
+const copy = {
+  zh: {
+    tab: '中文报告',
+    title: '采购决策报告',
+    generated: '生成于',
+    verdict: '采购结论',
+    ranking: '供应商优先级',
+    gaps: '重点价差',
+    specs: '规格待核实',
+    nextSteps: '下一步',
+    risks: '风险提示',
+    rank: '排名',
+    supplier: '供应商',
+    wins: '最低价项数',
+    note: '采购判断',
+    project: '项目号',
+    lowest: '最低价方',
+    highest: '最高价方',
+    gap: '价差',
+    issue: '待核实事项',
+    scroll: '左右滑动查看完整表格',
+    exportExcel: '导出 Excel',
+    exportPdf: '导出 PDF',
+  },
+  en: {
+    tab: 'English report',
+    title: 'Procurement Decision Report',
+    generated: 'Generated',
+    verdict: 'Decision',
+    ranking: 'Supplier Priority',
+    gaps: 'Key Price Gaps',
+    specs: 'Specification Checks',
+    nextSteps: 'Next Steps',
+    risks: 'Risks',
+    rank: 'Rank',
+    supplier: 'Supplier',
+    wins: 'Lowest-price wins',
+    note: 'Procurement view',
+    project: 'Project',
+    lowest: 'Lowest bidder',
+    highest: 'Highest bidder',
+    gap: 'Gap',
+    issue: 'Item to verify',
+    scroll: 'Scroll sideways to see the full table',
+    exportExcel: 'Export Excel',
+    exportPdf: 'Export PDF',
+  },
+}
+
+// 报告只显示一种语言；中英文以独立视图呈现，避免同一表格双列堆叠。
+function ReportPanel({ report, suppliers, items, procurementSummary, generatedAt }) {
+  const [language, setLanguage] = useState('zh')
+  const t = copy[language]
+  const isLegacyReport = Boolean(
+    report && !report.verdict && (report.executiveSummary || report.priceAnalysis),
+  )
   const r = normalizeClientReport(report)
-  const verdict = asBilingual(r.verdict)
+  const verdict = localized(r.verdict, language)
   const ranking = Array.isArray(r.ranking) ? r.ranking : []
   const keyGaps = Array.isArray(r.keyGaps) ? r.keyGaps : []
   const specIssues = Array.isArray(r.specIssues) ? r.specIssues : []
@@ -18,243 +81,203 @@ function ReportPanel({ report, suppliers, items, generatedAt }) {
 
   const handleExportExcel = async () => {
     const { exportReportToExcel } = await getExporters()
-    exportReportToExcel(r, suppliers, items)
+    exportReportToExcel(r, suppliers, items, procurementSummary)
   }
 
   return (
     <div className="report-panel printable">
       <div className="report-head no-print">
         <div className="report-head-left">
-          <p className="eyebrow">比价报告 / Comparison Report</p>
-          <h2>精简双语 · 表格对比</h2>
+          <p className="eyebrow">{t.tab}</p>
+          <h2>{t.title}</h2>
           {generatedAt ? (
-            <p className="report-meta">生成于 {formatDateTime(generatedAt)} · DeepSeek V4 Flash</p>
+            <p className="report-meta">
+              {t.generated} {formatDateTime(generatedAt)} · DeepSeek V4 Flash
+            </p>
           ) : null}
         </div>
-        <div className="report-export" data-onboarding="export-buttons">
-          <button type="button" className="ghost-button report-export-btn" onClick={handleExportExcel}>
-            <FileSpreadsheet size={16} />
-            导出 Excel
-          </button>
-          <button
-            type="button"
-            className="ghost-button report-export-btn"
-            onClick={async () => {
-              const { exportReportToPDF } = await getExporters()
-              exportReportToPDF()
-            }}
-          >
-            <FileType size={16} />
-            导出 PDF
-          </button>
+        <div className="report-head-actions">
+          <div className="report-language-switch" role="tablist" aria-label="Report language">
+            {Object.entries(copy).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={language === key}
+                className={language === key ? 'is-active' : ''}
+                onClick={() => setLanguage(key)}
+              >
+                {label.tab}
+              </button>
+            ))}
+          </div>
+          <div className="report-export" data-onboarding="export-buttons">
+            <button type="button" className="ghost-button report-export-btn" onClick={handleExportExcel}>
+              <FileSpreadsheet size={16} />
+              {t.exportExcel}
+            </button>
+            <button
+              type="button"
+              className="ghost-button report-export-btn"
+              onClick={async () => {
+                const { exportReportToPDF } = await getExporters()
+                exportReportToPDF()
+              }}
+            >
+              <FileType size={16} />
+              {t.exportPdf}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="report-body">
-        {(verdict.zh || verdict.en) && (
-          <ReportSection icon={<Target size={16} />} title="结论 / Verdict">
-            {verdict.zh ? <p className="verdict-zh">{verdict.zh}</p> : null}
-            {verdict.en && verdict.en !== verdict.zh ? (
-              <p className="verdict-en">{verdict.en}</p>
-            ) : null}
+      <div className="report-body" lang={language === 'zh' ? 'zh-CN' : 'en'}>
+        {language === 'en' && isLegacyReport ? (
+          <ReportSection icon={<AlertTriangle size={16} />} title="English content unavailable" accent="warn">
+            <p className="verdict-main">
+              This saved report was generated before bilingual content was introduced. Generate the
+              report again to create the English version.
+            </p>
+          </ReportSection>
+        ) : (
+          <>
+        {verdict && (
+          <ReportSection icon={<Target size={16} />} title={t.verdict}>
+            <p className="verdict-main">{verdict}</p>
           </ReportSection>
         )}
 
         {ranking.length > 0 && (
-          <ReportSection icon={<ListOrdered size={16} />} title="供应商排名 / Ranking">
-            <div className="table-scroll">
-              <table className="report-table">
+          <ReportSection icon={<ListOrdered size={16} />} title={t.ranking}>
+            <ReportTable label={t.scroll}>
+              <table className="report-table report-table-ranking">
                 <thead>
                   <tr>
-                    <th>#</th>
-                    <th>供应商 / Supplier</th>
-                    <th>最低价项数 / Wins</th>
-                    <th>备注 ZH</th>
-                    <th>Note EN</th>
+                    <th>{t.rank}</th>
+                    <th>{t.supplier}</th>
+                    <th>{t.wins}</th>
+                    <th>{t.note}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ranking.map((row, idx) => {
-                    const note = asBilingual(row.note)
-                    return (
-                      <tr key={`${row.supplier}-${idx}`}>
-                        <td>{row.rank ?? idx + 1}</td>
-                        <td>
-                          <strong>{row.supplier || '—'}</strong>
-                        </td>
-                        <td>{row.lowestWins != null ? row.lowestWins : '—'}</td>
-                        <td>{note.zh || '—'}</td>
-                        <td className="cell-en">{note.en || '—'}</td>
-                      </tr>
-                    )
-                  })}
+                  {ranking.map((row, idx) => (
+                    <tr key={`${row.supplier}-${idx}`}>
+                      <td>{row.rank ?? idx + 1}</td>
+                      <td><strong>{row.supplier || '—'}</strong></td>
+                      <td>{row.lowestWins ?? '—'}</td>
+                      <td className="report-note-cell">{localized(row.note, language) || '—'}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-            </div>
-          </ReportSection>
-        )}
-
-        {items?.length > 0 && (
-          <ReportSection icon={<GitCompare size={16} />} title="比价矩阵 / Price Matrix">
-            <div className="table-scroll">
-              <table className="report-table report-matrix">
-                <thead>
-                  <tr>
-                    <th>项目号 / Project</th>
-                    <th>类型 / Type</th>
-                    {suppliers.map((s) => (
-                      <th key={s.id}>{s.name}</th>
-                    ))}
-                    <th>最低 / Lowest</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => {
-                    const lowestName =
-                      suppliers.find((s) => s.id === item.lowestSupplierId)?.name || '—'
-                    return (
-                      <tr key={item.id || item.projectNo}>
-                        <td>
-                          <strong>{item.projectNo}</strong>
-                        </td>
-                        <td>{item.name || '—'}</td>
-                        {suppliers.map((s) => {
-                          const q = item.quotes?.find((x) => x.supplierId === s.id)
-                          const isLowest = s.id === item.lowestSupplierId
-                          if (!q?.matched || q.totalPrice == null) {
-                            return (
-                              <td key={s.id} className="is-missing">
-                                漏报
-                              </td>
-                            )
-                          }
-                          return (
-                            <td key={s.id} className={isLowest ? 'is-lowest' : ''}>
-                              {formatPrice(q.totalPrice)}
-                            </td>
-                          )
-                        })}
-                        <td>{lowestName}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+            </ReportTable>
           </ReportSection>
         )}
 
         {keyGaps.length > 0 && (
-          <ReportSection icon={<GitCompare size={16} />} title="关键价差 / Key Gaps">
-            <div className="table-scroll">
-              <table className="report-table">
+          <ReportSection icon={<MoveHorizontal size={16} />} title={t.gaps}>
+            <ReportTable label={t.scroll}>
+              <table className="report-table report-table-gaps">
                 <thead>
                   <tr>
-                    <th>项目号</th>
-                    <th>最低</th>
-                    <th>最高</th>
-                    <th>价差%</th>
-                    <th>备注 ZH</th>
-                    <th>Note EN</th>
+                    <th>{t.project}</th>
+                    <th>{t.lowest}</th>
+                    <th>{t.highest}</th>
+                    <th>{t.gap}</th>
+                    <th>{t.note}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {keyGaps.map((row, idx) => {
-                    const note = asBilingual(row.note)
-                    return (
-                      <tr key={`${row.projectNo}-${idx}`}>
-                        <td>{row.projectNo || '—'}</td>
-                        <td>{row.lowest || '—'}</td>
-                        <td>{row.highest || '—'}</td>
-                        <td>{row.gapPct != null ? `${row.gapPct}%` : '—'}</td>
-                        <td>{note.zh || '—'}</td>
-                        <td className="cell-en">{note.en || '—'}</td>
-                      </tr>
-                    )
-                  })}
+                  {keyGaps.map((row, idx) => (
+                    <tr key={`${row.projectNo}-${idx}`}>
+                      <td><strong>{row.projectNo || '—'}</strong></td>
+                      <td>{row.lowest || '—'}</td>
+                      <td>{row.highest || '—'}</td>
+                      <td>{row.gapPct != null ? `${row.gapPct}%` : '—'}</td>
+                      <td className="report-note-cell">{localized(row.note, language) || '—'}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-            </div>
+            </ReportTable>
           </ReportSection>
         )}
 
         {specIssues.length > 0 && (
-          <ReportSection
-            icon={<AlertTriangle size={16} />}
-            title="规格问题 / Spec Issues"
-            accent="warn"
-          >
-            <div className="table-scroll">
-              <table className="report-table">
+          <ReportSection icon={<AlertTriangle size={16} />} title={t.specs} accent="warn">
+            <ReportTable label={t.scroll}>
+              <table className="report-table report-table-specs">
                 <thead>
                   <tr>
-                    <th>项目号</th>
-                    <th>供应商</th>
-                    <th>问题 ZH</th>
-                    <th>Issue EN</th>
+                    <th>{t.project}</th>
+                    <th>{t.supplier}</th>
+                    <th>{t.issue}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {specIssues.map((row, idx) => {
-                    const issue = asBilingual(row.issue)
-                    return (
-                      <tr key={`${row.projectNo}-${idx}`}>
-                        <td>{row.projectNo || '—'}</td>
-                        <td>{row.supplier || '—'}</td>
-                        <td>{issue.zh || '—'}</td>
-                        <td className="cell-en">{issue.en || '—'}</td>
-                      </tr>
-                    )
-                  })}
+                  {specIssues.map((row, idx) => (
+                    <tr key={`${row.projectNo}-${idx}`}>
+                      <td>{row.projectNo || '—'}</td>
+                      <td>{row.supplier || '—'}</td>
+                      <td className="report-note-cell">{localized(row.issue, language) || '—'}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-            </div>
+            </ReportTable>
           </ReportSection>
         )}
 
         {(nextSteps.some(hasBilingualText) || risks.some(hasBilingualText)) && (
           <div className="report-two-col">
             {nextSteps.some(hasBilingualText) && (
-              <ReportSection icon={<Target size={16} />} title="下一步 / Next Steps">
-                <ul className="report-compact-list">
-                  {nextSteps.map((step, idx) => {
-                    const t = asBilingual(step)
-                    if (!t.zh && !t.en) return null
-                    return (
-                      <li key={idx}>
-                        {t.zh ? <span>{t.zh}</span> : null}
-                        {t.en && t.en !== t.zh ? <span className="line-en">{t.en}</span> : null}
-                      </li>
-                    )
-                  })}
-                </ul>
+              <ReportSection icon={<Target size={16} />} title={t.nextSteps}>
+                <CompactList entries={nextSteps} language={language} />
               </ReportSection>
             )}
             {risks.some(hasBilingualText) && (
-              <ReportSection
-                icon={<AlertTriangle size={16} />}
-                title="风险 / Risks"
-                accent="warn"
-              >
-                <ul className="report-compact-list">
-                  {risks.map((risk, idx) => {
-                    const t = asBilingual(risk)
-                    if (!t.zh && !t.en) return null
-                    return (
-                      <li key={idx}>
-                        {t.zh ? <span>{t.zh}</span> : null}
-                        {t.en && t.en !== t.zh ? <span className="line-en">{t.en}</span> : null}
-                      </li>
-                    )
-                  })}
-                </ul>
+              <ReportSection icon={<AlertTriangle size={16} />} title={t.risks} accent="warn">
+                <CompactList entries={risks} language={language} />
               </ReportSection>
             )}
           </div>
         )}
+          </>
+        )}
       </div>
     </div>
   )
+}
+
+function ReportTable({ label, children }) {
+  return (
+    <div className="report-table-wrap">
+      <div className="report-table-scroll" tabIndex="0" aria-label={label}>
+        {children}
+      </div>
+      <p className="report-scroll-hint">
+        <ChevronLeft size={14} />
+        {label}
+        <ChevronRight size={14} />
+      </p>
+    </div>
+  )
+}
+
+function CompactList({ entries, language }) {
+  return (
+    <ul className="report-compact-list">
+      {entries.map((entry, idx) => {
+        const text = localized(entry, language)
+        return text ? <li key={idx}>{text}</li> : null
+      })}
+    </ul>
+  )
+}
+
+function localized(value, language) {
+  const text = asBilingual(value)
+  return text[language] || text.zh || text.en || ''
 }
 
 /** 兼容旧七章缓存 / 新表格结构 */

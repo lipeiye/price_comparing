@@ -10,7 +10,9 @@ import readXlsxFile from 'read-excel-file/browser'
 // 价格列的识别、对齐、计算全部由后端代码按表头文字完成，前端只负责如实搬运数据。
 const MAX_SHEETS = 5
 const MAX_ROWS_PER_SHEET = 120
-const MAX_COLUMNS_PER_SHEET = 60
+// 真实报价模板有 86 列；认证和包装信息位于第 60 列之后，必须保留给规则化规格核验。
+// 90 仍远低于上传图片原文件的量级，不会拖慢浏览器端解析。
+const MAX_COLUMNS_PER_SHEET = 90
 
 export async function extractWorkbook(file, filename) {
   let parsed

@@ -7,6 +7,7 @@ const crypto = require('crypto')
 const COLLECTION = 'quote_cache'
 const TTL_MS = 30 * 24 * 60 * 60 * 1000
 const DOC_SIZE_SOFT_LIMIT = 900 * 1024
+const REPORT_CACHE_VERSION = 'v4-bilingual'
 
 let dbReady = null
 
@@ -91,6 +92,7 @@ async function saveAnalyzeResult(contentHash, payload) {
       summary: payload.summary || { zh: '', en: '' },
       report: existing?.report || null,
       reportGeneratedAt: existing?.reportGeneratedAt || null,
+      reportCacheVersion: existing?.reportCacheVersion || null,
       rawWorkbooks: payload.rawWorkbooks || existing?.rawWorkbooks || null,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
@@ -109,35 +111,45 @@ async function saveAnalyzeResult(contentHash, payload) {
   }
 }
 
-async function saveReport(contentHash, report, generatedAt) {
+async function saveReport(contentHash, report, generatedAt, reportCacheVersion = REPORT_CACHE_VERSION) {
   if (!contentHash || !report) return false
   try {
     const db = await getDb()
     if (!db) return false
     const now = Date.now()
     const existing = await getByHash(contentHash)
+    const reportFields = {
+      report,
+      reportGeneratedAt: generatedAt || new Date().toISOString(),
+      reportCacheVersion,
+      updatedAt: now,
+      expiresAt: now + TTL_MS,
+    }
+
     if (existing) {
-      await db.collection(COLLECTION).doc(contentHash).update({
-        report,
-        reportGeneratedAt: generatedAt || new Date().toISOString(),
-        updatedAt: now,
-        expiresAt: now + TTL_MS,
-      })
+      try {
+        await db.collection(COLLECTION).doc(contentHash).update(reportFields)
+      } catch {
+        // 某些云端 SDK 版本对 update 的文档形态兼容性不一致；回退为完整 set，
+        // 保留原比价结果，避免报告生成成功却没有写进缓存。
+        const { _id, ...existingData } = existing
+        await db.collection(COLLECTION).doc(contentHash).set({
+          ...existingData,
+          ...reportFields,
+        })
+      }
       return true
     }
     await db.collection(COLLECTION).doc(contentHash).set({
       contentHash,
-      report,
-      reportGeneratedAt: generatedAt || new Date().toISOString(),
       suppliers: [],
       items: [],
       warnings: [],
       summary: { zh: '', en: '' },
       fileNames: [],
       createdAt: now,
-      updatedAt: now,
-      expiresAt: now + TTL_MS,
       schemaVersion: 1,
+      ...reportFields,
     })
     return true
   } catch (err) {
@@ -147,6 +159,10 @@ async function saveReport(contentHash, report, generatedAt) {
 }
 
 function toAnalyzeResponse(doc, { requestId, cacheHit }) {
+  const cachedReport = isCurrentBilingualReport(doc)
+    ? { report: doc.report, generatedAt: doc.reportGeneratedAt || null }
+    : null
+
   return {
     success: true,
     requestId,
@@ -156,10 +172,20 @@ function toAnalyzeResponse(doc, { requestId, cacheHit }) {
     items: doc.items || [],
     warnings: doc.warnings || [],
     summary: doc.summary || { zh: '', en: '' },
-    cachedReport: doc.report
-      ? { report: doc.report, generatedAt: doc.reportGeneratedAt || null }
-      : null,
+    cachedReport,
   }
+}
+
+function isCurrentBilingualReport(doc) {
+  const report = doc?.report
+  return Boolean(
+    doc?.reportCacheVersion === REPORT_CACHE_VERSION &&
+      report &&
+      typeof report === 'object' &&
+      report.verdict &&
+      typeof report.verdict.zh === 'string' &&
+      typeof report.verdict.en === 'string',
+  )
 }
 
 module.exports = {
@@ -169,4 +195,5 @@ module.exports = {
   saveAnalyzeResult,
   saveReport,
   toAnalyzeResponse,
+  REPORT_CACHE_VERSION,
 }

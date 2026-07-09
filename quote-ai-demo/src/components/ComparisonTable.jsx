@@ -4,8 +4,32 @@ import { formatPrice } from '../utils/formatters.js'
 // 比价表：按项目号把同一项目跨家对齐成一行，逐家显示总价 + 成本拆分，
 // 最低价高亮，漏报价显式标"漏报"，总价量级差异大的整行标"口径存疑"。
 function ComparisonTable({ result }) {
+  const snapshot = makeProcurementSnapshot(result)
+
   return (
     <>
+      <div className="procurement-snapshot" aria-label="采购速览">
+        <div className="snapshot-card snapshot-leader">
+          <span>采购优先</span>
+          <strong>{snapshot.orderLeader.name}</strong>
+          <small>{snapshot.orderLeader.note}</small>
+        </div>
+        <div className="snapshot-card">
+          <span>已知首单金额</span>
+          <strong>{formatPrice(snapshot.orderLeader.knownTotal)}</strong>
+          <small>{snapshot.orderLeader.amountNote}</small>
+        </div>
+        <div className="snapshot-card snapshot-saving">
+          <span>相对次优节省</span>
+          <strong>{snapshot.knownSavings != null ? formatPrice(snapshot.knownSavings) : '待补数量'}</strong>
+          <small>{snapshot.comparableItems}/{result.items.length} 项可直接比较</small>
+        </div>
+        <div className="snapshot-card snapshot-review">
+          <span>优先核实</span>
+          <strong>{snapshot.reviewItems}</strong>
+          <small>漏报、规格或价格口径</small>
+        </div>
+      </div>
       <div className="table-scroll">
         <table className="comparison-table">
           <thead>
@@ -20,6 +44,7 @@ function ComparisonTable({ result }) {
           </thead>
           <tbody>
             {result.items.map((item) => {
+              const priceRanks = makePriceRanks(item.quotes)
               const caliberSuspect =
                 item.pricedCount >= 2 &&
                 item.lowestPrice != null &&
@@ -35,7 +60,8 @@ function ComparisonTable({ result }) {
                   </td>
                   {result.suppliers.map((supplier) => {
                     const quote = item.quotes.find((entry) => entry.supplierId === supplier.id)
-                    const isLowest = supplier.id === item.lowestSupplierId
+                    const priceRank = priceRanks.get(supplier.id)
+                    const isLowest = priceRank === 1
 
                     return (
                       <td
@@ -45,7 +71,7 @@ function ComparisonTable({ result }) {
                         }`}
                       >
                         {quote?.matched ? (
-                          <QuoteDetail quote={quote} isLowest={isLowest} />
+                          <QuoteDetail quote={quote} priceRank={priceRank} />
                         ) : (
                           <strong className="missing-tag">漏报</strong>
                         )}
@@ -63,14 +89,14 @@ function ComparisonTable({ result }) {
       </div>
       <div className="table-note">
         <AlertTriangle size={15} />
-        同一项目号跨家对齐；总价差距 ≥ 2 倍的行标为「口径存疑」，需逐家核实含税/分摊口径。
+        绿色为最低价，蓝色为次低价，灰色为第三低价；总价差距 ≥ 2 倍标为「口径存疑」，需核实含税/分摊口径。
       </div>
     </>
   )
 }
 
-// 单家报价单元格：总价（最低则标记）+ 成本拆分明细
-function QuoteDetail({ quote, isLowest }) {
+// 单家报价单元格：总价 + 前三价格位次 + 成本拆分明细。
+function QuoteDetail({ quote, priceRank }) {
   const cost = quote.costBreakdown || {}
   const costParts = [
     cost.rawLamp != null && { label: '毛坯', value: cost.rawLamp },
@@ -84,11 +110,15 @@ function QuoteDetail({ quote, isLowest }) {
     <>
       <div className="quote-price">
         {formatPrice(quote.totalPrice)}
-        {isLowest ? (
+        {priceRank === 1 ? (
           <span className="tag green">
             <BadgeCheck size={13} />
             最低
           </span>
+        ) : priceRank === 2 ? (
+          <span className="tag blue">次低</span>
+        ) : priceRank === 3 ? (
+          <span className="tag gray">第三低</span>
         ) : null}
       </div>
       {costParts.length > 0 ? (
@@ -105,8 +135,12 @@ function QuoteDetail({ quote, isLowest }) {
 }
 
 function VerdictCell({ item, suppliers, caliberSuspect }) {
-  const lowestName =
-    suppliers.find((s) => s.id === item.lowestSupplierId)?.name || ''
+  const rankedQuotes = rankQuotes(item.quotes)
+  const lowestIds = rankedQuotes.filter((q) => q.rank === 1).map((q) => q.supplierId)
+  const lowestName = suppliers
+    .filter((s) => lowestIds.includes(s.id))
+    .map((s) => s.name)
+    .join('、')
   const parts = []
   if (item.pricedCount === 0) {
     return <span className="verdict-none">三家均未报价</span>
@@ -131,6 +165,85 @@ function VerdictCell({ item, suppliers, caliberSuspect }) {
     )
   }
   return <div className="verdict-list">{parts}</div>
+}
+
+function makePriceRanks(quotes = []) {
+  return new Map(rankQuotes(quotes).map((quote) => [quote.supplierId, quote.rank]))
+}
+
+function rankQuotes(quotes = []) {
+  const priced = quotes
+    .filter((quote) => quote?.matched && quote.totalPrice != null)
+    .slice()
+    .sort((a, b) => a.totalPrice - b.totalPrice)
+
+  let lastPrice = null
+  let rank = 0
+  return priced.map((quote) => {
+    if (quote.totalPrice !== lastPrice) {
+      rank += 1
+      lastPrice = quote.totalPrice
+    }
+    return { ...quote, rank }
+  })
+}
+
+function makeProcurementSnapshot(result) {
+  const wins = new Map(result.suppliers.map((supplier) => [supplier.id, 0]))
+  let comparableItems = 0
+  let reviewItems = 0
+
+  for (const item of result.items) {
+    const ranks = rankQuotes(item.quotes)
+    const isComparable =
+      ranks.length >= 2 &&
+      item.lowestPrice != null &&
+      item.highestPrice != null &&
+      item.highestPrice / item.lowestPrice < 2
+
+    if (isComparable) comparableItems += 1
+    if (!isComparable || item.missingCount > 0) reviewItems += 1
+    for (const quote of ranks.filter((quote) => quote.rank === 1)) {
+      wins.set(quote.supplierId, (wins.get(quote.supplierId) || 0) + 1)
+    }
+  }
+
+  const priceLeader = result.suppliers
+    .map((supplier) => ({ name: supplier.name, wins: wins.get(supplier.id) || 0 }))
+    .sort((a, b) => b.wins - a.wins || a.name.localeCompare(b.name))[0] || { name: '—', wins: 0 }
+
+  const totals = result.procurementSummary?.supplierTotals || []
+  const orderLeaderTotal = totals.find(
+    (total) => total.supplierId === result.procurementSummary?.orderLeaderSupplierId,
+  )
+  const priceLeaderTotal = totals.find(
+    (total) => total.supplierId === result.procurementSummary?.priceLeaderSupplierId,
+  )
+  const orderLeaderSupplier = result.suppliers.find(
+    (supplier) => supplier.id === orderLeaderTotal?.supplierId,
+  )
+  const orderLeader = orderLeaderTotal
+    ? {
+      name: orderLeaderSupplier?.name || '—',
+      knownTotal: orderLeaderTotal.knownFirstOrderTotal,
+      note: '按已知首单总额领先',
+      amountNote: `${orderLeaderTotal.knownAmountItems} 项含数量${orderLeaderTotal.missingQuantityItems ? ` · ${orderLeaderTotal.missingQuantityItems} 项待补数量` : ''}`,
+    }
+    : {
+      name: priceLeader.name,
+      knownTotal: priceLeaderTotal?.knownFirstOrderTotal ?? null,
+      note: `${priceLeader.wins} 项最低价`,
+      amountNote: priceLeaderTotal?.knownAmountItems
+        ? `仅 ${priceLeaderTotal.knownAmountItems} 项可算，暂不可横向比较`
+        : '首单数量待补齐',
+    }
+
+  return {
+    orderLeader,
+    knownSavings: result.procurementSummary?.knownOrderSavings ?? null,
+    comparableItems,
+    reviewItems,
+  }
 }
 
 export default ComparisonTable

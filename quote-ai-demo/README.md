@@ -1,6 +1,6 @@
 # 智采 AI 报价比价
 
-> 上传 2–8 份供应商 Excel 报价单，自动逐项对齐、标最低价、检测异常、生成精炼双语采购建议。可选表格化中英报告，导出 Excel 或 PDF。全程 DeepSeek V4 Flash；相同内容走服务端缓存，不重复烧 token。
+> 上传 2–8 份供应商 Excel 报价单，自动逐项对齐、标最低价、检测漏报/模具费/关键规格差异，并生成无需等待 AI 的快速采购结论。可选中文 / English 独立报告，导出 Excel 或 PDF。
 
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite)](https://vite.dev/)
@@ -32,8 +32,8 @@
 点「开始智能比价」：
 
 1. **contentHash** — 对表格内容 SHA-256；云库 `quote_cache` 命中则直接返回（`cacheHit: true`）。
-2. **代码对齐**（`align.js`，秒级）— 项目号对齐、最低/最高/均价、漏报/量级/模具费。
-3. **AI 叙述**（DeepSeek V4 Flash）— 精炼中英 `summary: { zh, en }` + 规格篡改类 warnings。AI 失败不挡比价表。
+2. **代码对齐与规则核验**（`align.js`，秒级）— 项目号对齐、最低/最高/均价、漏报/量级/模具费、尺寸/材质/功率/认证等关键规格差异。
+3. **快速采购结论** — 按首单数量计算已知金额，并标明未报项目、缺失数量与不可直接下单的规格差异；不调用 AI。
 
 ### 第三步：精简双语报告（可选）
 
@@ -41,14 +41,15 @@
 
 | 区块 | 内容 |
 |------|------|
-| 结论 Verdict | 中英各一句 |
-| 排名 Ranking | 名次 / 最低价项数 / 短评 |
-| 比价矩阵 | 项目 × 供应商（代码结果） |
+| 结论 | 一句采购结论 |
+| 排名 | 名次 / 最低价项数 / 短评 |
 | 关键价差 | ≤6 条 |
 | 规格问题 | ≤8 条 |
-| 下一步 / 风险 | 各 ≤3 条双语 |
+| 下一步 / 风险 | 各 ≤3 条 |
 
-导出 **Excel（多 sheet）** 或 **PDF**。若该 `contentHash` 已有 `report`，直接命中缓存。
+网页报告用「中文报告 / English report」切换，避免同一行重复堆叠中英文本；完整项目 × 供应商比价矩阵保留在上方快速比价表，并提供最低、次低、第三低价标记。
+
+导出 **Excel（多 sheet）** 或 **PDF**。Excel 包含决策速览、完整项目 × 供应商单价/首单金额矩阵、中文与英文报告页。若该 `contentHash` 已有 `report`，直接命中缓存。
 
 ### 关页恢复
 
@@ -89,7 +90,7 @@ quote-ai-demo/
 │
 ├── cloudfunctions/
 │   ├── analyzeQuotes/
-│   │   ├── index.js                # 对齐 + AI + 缓存
+│   │   ├── index.js                # 对齐 + 规则结论 + 缓存
 │   │   ├── cache.js                # quote_cache 读写
 │   │   ├── align.js
 │   │   ├── prompt.js / schema.js
@@ -139,7 +140,7 @@ flowchart TB
         Hash1[contentHash]
         Cache1[(quote_cache)]
         Align[align.js]
-        AI1[DeepSeek V4 Flash]
+        Rules[规格规则 + 首单总额]
     end
 
     subgraph CF2["generateReport"]
@@ -151,10 +152,10 @@ flowchart TB
     Upload --> Parse
     Parse --> Hash1
     Hash1 --> Cache1
-    Cache1 -->|miss| Align --> AI1
+    Cache1 -->|miss| Align --> Rules
     Cache1 -->|hit| UI
-    AI1 --> Cache1
-    AI1 --> UI
+    Rules --> Cache1
+    Rules --> UI
     UI --> Hash2
     Hash2 --> Cache2
     Cache2 -->|miss| AI2 --> Cache2
@@ -164,7 +165,7 @@ flowchart TB
 
 设计决策：
 
-- **代码对齐 + AI 叙述分离** — 价格永不依赖模型。
+- **代码对齐 + 规则结论** — 快速比价、异常与首单金额永不依赖模型；AI 仅在按需报告时使用。
 - **双函数** — 快出表 / 按需报告，互不阻塞。
 - **全程 Flash** — 速度优先，不用 Pro。
 - **contentHash 缓存** — 省 token；DB 失败静默降级。

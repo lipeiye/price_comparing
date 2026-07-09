@@ -14,9 +14,9 @@
 | 环境 ID | `price-comparing-demo-d2adc62c70c` |
 | 前端 | https://price-comparing-demo-d2adc62c70c-1451548054.tcloudbaseapp.com |
 | 网关 | `https://price-comparing-demo-d2adc62c70c-1451548054.ap-shanghai.app.tcloudbase.com` |
-| analyzeQuotes | `…/api/analyzeQuotes` → version **`v6-cache-hash-30d`** |
+| analyzeQuotes | `…/api/analyzeQuotes` → version **`v7-fast-rule-decision`** |
 | generateReport | `…/api/generateReport` → version **`v3-report-cache-hash`** |
-| AI 模型 | **全程 `deepseek-v4-flash`**（禁止 Pro；代码会强制降级 pro/reasoner） |
+| AI 模型 | `generateReport` 按需使用 **`deepseek-v4-flash`**（禁止 Pro）；`analyzeQuotes` 不调用 AI |
 | 上传上限 | **2–8** 份 xlsx |
 | 缓存 | 云库集合 **`quote_cache`**，contentHash=SHA-256(表格内容)，TTL 30 天 |
 | 多用户 / 小程序 | **未做**；产品决策：先 Web；小程序若做只读历史即可 |
@@ -24,7 +24,7 @@
 ```bash
 # 健康检查（部署后必跑）
 curl -sS "https://price-comparing-demo-d2adc62c70c-1451548054.ap-shanghai.app.tcloudbase.com/api/analyzeQuotes?ping=1"
-# → {"success":true,"pong":true,"version":"v6-cache-hash-30d","cache":true}
+# → {"success":true,"pong":true,"version":"v7-fast-rule-decision","cache":true}
 
 curl -sS "https://price-comparing-demo-d2adc62c70c-1451548054.ap-shanghai.app.tcloudbase.com/api/generateReport?ping=1"
 # → {"success":true,"pong":true,"version":"v3-report-cache-hash","cache":true}
@@ -35,7 +35,7 @@ curl -sS "https://price-comparing-demo-d2adc62c70c-1451548054.ap-shanghai.app.tc
 ## 架构（不要推翻的不变量）
 
 1. **浏览器解析 Excel**（`read-excel-file`）→ 只传 JSON，不传原文件。
-2. **代码对齐**（`align.js`）负责价格/最低价/漏报/量级；**AI 只写叙述 + 规格篡改**。AI 挂了比价表仍返回。
+2. **代码对齐与规则核验**（`align.js`）负责价格/最低价/漏报/量级/模具费/关键规格差异/首单已知金额；快速结论不调用 AI。
 3. **两云函数拆开**：`analyzeQuotes` 快出表；`generateReport` 按需出精简双语报告。
 4. **缓存优先于 AI**：相同表格内容 hash 命中 → `cacheHit:true`，0 token。
 5. 两函数各有一份 `align.js` / `cache.js`（独立部署，无 monorepo 共享包）。
@@ -43,7 +43,7 @@ curl -sS "https://price-comparing-demo-d2adc62c70c-1451548054.ap-shanghai.app.tc
 ```
 Browser: parse xlsx → workbooks JSON
        → POST analyzeQuotes
-CF: hash(workbooks) → quote_cache hit? return : align + Flash → set cache
+CF: hash(workbooks) → quote_cache hit? return : align + 规则核验 → set cache
        → optional POST generateReport(contentHash, aligned, raw)
 CF: cache.report hit? return : Flash → update cache.report
 ```
@@ -62,12 +62,24 @@ CF: cache.report hit? return : Flash → update cache.report
 | 改动 | 要点 |
 |------|------|
 | 模型 | `generateReport` 去掉 Pro/思考模式；默认 Flash；`AI_REPORT_MODEL` 含 pro 时强制 flash |
-| 报告形态 | 废弃七章长文 → `verdict/ranking/keyGaps/specIssues/nextSteps/risks` 表格化中英 |
+| 报告形态 | 废弃七章长文 → `verdict/ranking/keyGaps/specIssues/nextSteps/risks` 精简结构；前端中文 / English 独立切换 |
 | Prompt/Schema | 两个函数的 prompt/schema 重写为「短、硬、双语」 |
 | 上传上限 | 前端 `MAX_FILES=8` + 后端 `MAX_WORKBOOKS=8` + 文案 |
 | 导出 | Word 长文 → **Excel（SpreadsheetML .xls 多 sheet）** + PDF |
 | 建议 summary | `{ zh, en }` 对象（兼容旧 string） |
 | 部署 | 静态托管 + 两云函数已上线 |
+
+### C. v7 快速采购决策（真实 JOM / LBB / Granda 报价单回归）
+
+| 改动 | 要点 |
+|------|------|
+| 首次响应 | `analyzeQuotes` 移除首轮 AI 调用；结果由代码直接生成，避免首次等待模型 |
+| 金额口径 | 逐项保留 `1st order quantity`，计算 `firstOrderAmount`；模具费单列计入已知总额 |
+| 规格 | 规则核验尺寸、主材、功率、驱动、色温、流明、认证；只展开前 8 项，避免异常列表过载 |
+| Excel | 修复导出时遗漏 suppliers/items 的问题；新增「决策速览」，矩阵含单价和首单金额 |
+| 完整字段 | 浏览器/云函数列上限从 60 提至 90，保留认证与包装区字段 |
+
+**真实回归结果：** 28 项成功对齐；LBB 漏报 12 项、模具费 RMB 41,700；JOM 单价 28 项最低。LBB/Granda 缺少首单数量，因此系统明确显示「不可横向比较总采购额」，不会伪造节省金额。
 
 **踩坑（必须知道）：**
 

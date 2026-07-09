@@ -25,7 +25,9 @@ import {
 } from './services/analyzeQuotes.js'
 import {
   generateReport,
+  isCurrentReportCache,
   loadCachedReport,
+  REPORT_CACHE_VERSION,
 } from './services/generateReport.js'
 import { formatFileSize } from './utils/formatters.js'
 import {
@@ -39,7 +41,7 @@ const progressSteps = [
   '正在读取 Excel 工作表',
   '正在统一商品名称与规格',
   '正在检测价格和条款异常',
-  '正在调用 DeepSeek 生成采购建议',
+  '正在生成快速采购结论',
 ]
 
 function App() {
@@ -81,6 +83,10 @@ function App() {
   const totalSize = useMemo(
     () => files.reduce((sum, item) => sum + item.size, 0),
     [files],
+  )
+  const sortedWarnings = useMemo(
+    () => sortWarnings(result?.warnings || []),
+    [result],
   )
 
   const canAnalyze = files.length >= 2 && !isAnalyzing
@@ -140,6 +146,7 @@ function App() {
         report: analysisResult.cachedReport.report,
         generatedAt: analysisResult.cachedReport.generatedAt,
         cacheHit: true,
+        cacheVersion: REPORT_CACHE_VERSION,
       })
     }
 
@@ -150,10 +157,11 @@ function App() {
       workbooks,
       report: analysisResult.cachedReport?.report
         ? {
-            report: analysisResult.cachedReport.report,
-            generatedAt: analysisResult.cachedReport.generatedAt,
-            cacheHit: true,
-          }
+          report: analysisResult.cachedReport.report,
+          generatedAt: analysisResult.cachedReport.generatedAt,
+          cacheHit: true,
+          cacheVersion: REPORT_CACHE_VERSION,
+        }
         : null,
       cacheHit: Boolean(analysisResult.cacheHit),
     }
@@ -177,9 +185,12 @@ function App() {
     workbooksRef.current = session.workbooks
     contentHashRef.current = session.contentHash
     analyzedFilesRef.current = []
-    setReport(session.report || null)
+    const restoredReport = isCurrentReportCache(session.report) ? session.report : null
+    setReport(restoredReport)
     setCacheBanner(
-      session.cacheHit
+      session.report && !restoredReport
+        ? '已恢复上次比价；旧版报告请重新生成以获得完整中英文内容'
+        : session.cacheHit
         ? '已恢复上次比价（来自本机快照 · 当时命中云端缓存）'
         : '已恢复上次比价（来自本机快照）',
     )
@@ -199,7 +210,7 @@ function App() {
     try {
       const data = await restoreByContentHash(hash)
       applyAnalysisResult(data, session.workbooks || data.rawWorkbooks || null, [])
-      if (!data.cachedReport && session.report) {
+      if (!data.cachedReport && isCurrentReportCache(session.report)) {
         setReport(session.report)
       }
       setCacheBanner('已从云端缓存恢复，未调用 AI')
@@ -447,7 +458,7 @@ function App() {
                   <FileSearch size={20} />
                 </div>
                 <div className="warning-list">
-                  {(result.warnings || []).map((warning) => (
+                  {sortedWarnings.map((warning) => (
                     <WarningCard key={warning.id} warning={warning} />
                   ))}
                 </div>
@@ -474,6 +485,7 @@ function App() {
               report={report.report}
               suppliers={result?.suppliers || []}
               items={result?.items || []}
+              procurementSummary={result?.procurementSummary || null}
               generatedAt={report.generatedAt}
             />
           </section>
@@ -499,6 +511,18 @@ function formatSessionLabel(session) {
   return [when, names ? `${names}${more}` : null, items ? `${items} 个项目` : null]
     .filter(Boolean)
     .join(' · ')
+}
+
+function sortWarnings(warnings) {
+  const priority = { critical: 0, high: 1, medium: 2, low: 3 }
+  return warnings
+    .map((warning, index) => ({ warning, index }))
+    .sort(
+      (a, b) =>
+        (priority[a.warning.severity] ?? 4) - (priority[b.warning.severity] ?? 4) ||
+        a.index - b.index,
+    )
+    .map(({ warning }) => warning)
 }
 
 export default App

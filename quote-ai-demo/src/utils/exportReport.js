@@ -1,11 +1,11 @@
 import { saveAs } from 'file-saver'
-import { formatPrice } from './formatters.js'
 import { asBilingual } from './bilingual.js'
 
 // 导出 Excel 兼容文件（SpreadsheetML .xls，Excel / WPS 均可打开，零额外依赖）
-export function exportReportToExcel(report, suppliers, items) {
+export function exportReportToExcel(report, suppliers, items, procurementSummary) {
   const r = report || {}
   const sheets = [
+    buildDecisionSheet(r, suppliers, procurementSummary),
     buildVerdictSheet(r),
     buildRankingSheet(r),
     buildMatrixSheet(suppliers, items),
@@ -29,8 +29,8 @@ ${sheets.join('\n')}
 }
 
 // 保留旧 Word 导出入口（若他处引用）；改为简表
-export async function exportReportToDocx(report, suppliers, items) {
-  exportReportToExcel(report, suppliers, items)
+export async function exportReportToDocx(report, suppliers, items, procurementSummary) {
+  exportReportToExcel(report, suppliers, items, procurementSummary)
 }
 
 export function exportReportToPDF() {
@@ -43,6 +43,35 @@ function buildVerdictSheet(r) {
     ['字段 / Field', '中文 ZH', 'English EN'],
     ['结论 Verdict', v.zh, v.en],
   ])
+}
+
+function buildDecisionSheet(r, suppliers = [], procurementSummary) {
+  const totals = procurementSummary?.supplierTotals || []
+  const totalItems = procurementSummary?.totalItems || 0
+  const supplierName = (supplierId) =>
+    suppliers.find((supplier) => supplier.id === supplierId)?.name || supplierId || '—'
+  const orderLeader = supplierName(procurementSummary?.orderLeaderSupplierId)
+  const priceLeader = supplierName(procurementSummary?.priceLeaderSupplierId)
+  const rows = [
+    ['快速采购结论 / Quick procurement decision', ''],
+    ['按首单已知总额领先 / Lowest known first-order total', orderLeader],
+    ['按最低 EXW 单价领先 / Most lowest unit-price wins', priceLeader],
+    ['相对第二名已知节省 / Known saving vs. runner-up', procurementSummary?.knownOrderSavings ?? '—'],
+    [],
+    ['供应商 / Supplier', '已报价项目 / Quoted items', '缺报 / Missing', '已知数量项目 / Rows with quantity', '已知首单金额 RMB / Known first-order amount', '模具费 RMB / Tooling', '已知合计 RMB / Known total'],
+    ...totals.map((total) => [
+      supplierName(total.supplierId),
+      totalItems ? `${total.quotedItems}/${totalItems}` : total.quotedItems,
+      total.missingItems,
+      total.knownAmountItems,
+      total.knownFirstOrderAmount,
+      total.toolingTotal,
+      total.knownFirstOrderTotal,
+    ]),
+    [],
+    ['说明 / Note', '“已知合计”只计算同时有 EXW 单价和首单数量的项目；请先处理漏报和规格不一致。 / “Known total” includes only rows with both EXW unit price and first-order quantity. Resolve missing quotes and specification differences first.'],
+  ]
+  return worksheet('决策速览 Decision', rows)
 }
 
 function buildRankingSheet(r) {
@@ -65,7 +94,8 @@ function buildMatrixSheet(suppliers = [], items = []) {
   const header = [
     '项目号 Project',
     '类型 Type',
-    ...suppliers.map((s) => s.name),
+    '首单数量 First-order qty',
+    ...suppliers.flatMap((s) => [`${s.name} 单价 Unit EXW (RMB)`, `${s.name} 首单金额 First-order amount (RMB)`]),
     '最低 Lowest',
   ]
   const rows = [header]
@@ -74,16 +104,22 @@ function buildMatrixSheet(suppliers = [], items = []) {
     rows.push([
       item.projectNo || '',
       item.name || '',
-      ...suppliers.map((s) => {
+      firstKnownQuantity(item),
+      ...suppliers.flatMap((s) => {
         const q = item.quotes?.find((x) => x.supplierId === s.id)
-        if (!q?.matched || q.totalPrice == null) return '漏报'
-        return formatPrice(q.totalPrice)
+        if (!q?.matched || q.totalPrice == null) return ['漏报 / Not quoted', '—']
+        return [q.totalPrice, q.firstOrderAmount ?? '数量缺失 / Qty missing']
       }),
       lowestName,
     ])
   }
-  if (rows.length === 1) rows.push(['—', '—', ...suppliers.map(() => '—'), '—'])
+  if (rows.length === 1) rows.push(['—', '—', '—', ...suppliers.flatMap(() => ['—', '—']), '—'])
   return worksheet('比价矩阵 Matrix', rows)
+}
+
+function firstKnownQuantity(item) {
+  const quote = (item.quotes || []).find((entry) => entry?.firstOrderQuantity != null)
+  return quote?.firstOrderQuantity ?? '—'
 }
 
 function buildGapsSheet(r) {

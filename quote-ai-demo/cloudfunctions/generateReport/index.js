@@ -1,6 +1,6 @@
 const { reportAnalysisPrompt } = require('./prompt')
 const { reportSchema } = require('./schema')
-const { hashWorkbooks, getByHash, saveReport } = require('./cache')
+const { hashWorkbooks, getByHash, saveReport, REPORT_CACHE_VERSION } = require('./cache')
 
 // 详细分析报告云函数（与 analyzeQuotes 解耦）：
 // 输入：alignedResult + rawWorkbooks；按 contentHash 缓存，命中则跳过 AI。
@@ -36,7 +36,7 @@ exports.main = async (event = {}) => {
     // 服务端已有报告 → 直接返回
     if (contentHash) {
       const cached = await getByHash(contentHash)
-      if (cached?.report) {
+      if (isCurrentBilingualReport(cached)) {
         console.log(JSON.stringify({ requestId, message: 'report cache hit', contentHash }))
         return response(200, {
           success: true,
@@ -52,8 +52,11 @@ exports.main = async (event = {}) => {
     const report = await callAi(alignedResult, rawWorkbooks, requestId)
     const generatedAt = new Date().toISOString()
 
-    if (contentHash) {
-      await saveReport(contentHash, report, generatedAt)
+    const cacheSaved = contentHash
+      ? await saveReport(contentHash, report, generatedAt, REPORT_CACHE_VERSION)
+      : false
+    if (contentHash && !cacheSaved) {
+      console.warn(JSON.stringify({ requestId, message: 'report cache save failed', contentHash }))
     }
 
     return response(200, {
@@ -61,6 +64,7 @@ exports.main = async (event = {}) => {
       requestId,
       cacheHit: false,
       contentHash: contentHash || undefined,
+      cacheSaved,
       report,
       generatedAt,
     })
@@ -223,6 +227,19 @@ function bilingual(value, fallback = '') {
     return { zh: value, en: value }
   }
   return { zh: fallback, en: fallback }
+}
+
+function isCurrentBilingualReport(doc) {
+  const report = doc?.report
+  return Boolean(
+    doc?.reportCacheVersion === REPORT_CACHE_VERSION &&
+      report &&
+      typeof report === 'object' &&
+      report.verdict &&
+      typeof report.verdict.zh === 'string' &&
+      report.verdict.en &&
+      typeof report.verdict.en === 'string',
+  )
 }
 
 function normalizeReport(raw) {

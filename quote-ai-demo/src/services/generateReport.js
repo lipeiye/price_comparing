@@ -3,6 +3,7 @@ const env = import.meta.env || {}
 const REPORT_API_URL = env.VITE_REPORT_API_URL
 
 const REPORT_STORAGE_KEY = 'quote-report-cache'
+export const REPORT_CACHE_VERSION = 'v4-bilingual'
 
 export function makeFilesFingerprint(files) {
   const sig = (files || []).map((f) => `${f.name}:${f.size}`).sort().join('|')
@@ -19,10 +20,15 @@ export function loadCachedReport(files) {
     const fp = makeFilesFingerprint(files)
     const raw = localStorage.getItem(`${REPORT_STORAGE_KEY}:${fp}`)
     if (!raw) return null
-    return JSON.parse(raw)
+    const cached = JSON.parse(raw)
+    return isCurrentReportCache(cached) ? cached : null
   } catch {
     return null
   }
+}
+
+export function isCurrentReportCache(reportData) {
+  return Boolean(reportData?.cacheVersion === REPORT_CACHE_VERSION)
 }
 
 function cacheReportLocal(files, reportData) {
@@ -64,6 +70,7 @@ export async function generateReport(alignedResult, workbooks, files, contentHas
     generatedAt: data.generatedAt,
     cacheHit: Boolean(data.cacheHit),
     contentHash: data.contentHash || contentHash || null,
+    cacheVersion: REPORT_CACHE_VERSION,
   }
   cacheReportLocal(files, reportData)
   return reportData
