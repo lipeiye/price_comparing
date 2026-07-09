@@ -1,180 +1,158 @@
-import {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-  HeadingLevel,
-  Table,
-  TableRow,
-  TableCell,
-  WidthType,
-  AlignmentType,
-} from 'docx'
 import { saveAs } from 'file-saver'
 import { formatPrice } from './formatters.js'
+import { asBilingual } from './bilingual.js'
 
-// 导出为 Word（.docx）：用 docx 库在浏览器端组装文档并触发下载。
-// 妈妈可在 Word 里二次编辑、加公司章、另存为 PDF。
-export async function exportReportToDocx(report, suppliers, items) {
+// 导出 Excel 兼容文件（SpreadsheetML .xls，Excel / WPS 均可打开，零额外依赖）
+export function exportReportToExcel(report, suppliers, items) {
   const r = report || {}
-  const children = []
+  const sheets = [
+    buildVerdictSheet(r),
+    buildRankingSheet(r),
+    buildMatrixSheet(suppliers, items),
+    buildGapsSheet(r),
+    buildSpecSheet(r),
+    buildActionsSheet(r),
+  ]
 
-  // 标题
-  children.push(
-    new Paragraph({
-      heading: HeadingLevel.TITLE,
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: '供应商报价比价分析报告', bold: true })],
-    }),
-  )
-  children.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: `生成时间：${nowText()}`, color: '666666', size: 20 })],
-      spacing: { after: 300 },
-    }),
-  )
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+${sheets.join('\n')}
+</Workbook>`
 
-  // 执行摘要
-  pushHeading(children, '一、执行摘要')
-  pushPara(children, r.executiveSummary)
-
-  // 价格分析
-  if (r.priceAnalysis) {
-    pushHeading(children, '二、价格分析')
-    if (r.priceAnalysis.overallRanking?.length) {
-      pushPara(children, '供应商整体排名：')
-      r.priceAnalysis.overallRanking.forEach((item) => {
-        pushPara(
-          children,
-          `  第 ${item.rank || ''} 名 ${item.supplier}：${item.avgPriceLevel || ''}${item.note ? '（' + item.note + '）' : ''}`,
-          false,
-        )
-      })
-    }
-    r.priceAnalysis.spreadInsights?.forEach((s) => pushPara(children, `• ${s}`, false))
-    if (r.priceAnalysis.costPerformance) pushPara(children, r.priceAnalysis.costPerformance)
-  }
-
-  // 规格核对
-  if (r.specAudit?.length) {
-    pushHeading(children, '三、规格逐项核对')
-    r.specAudit.forEach((audit) => {
-      pushPara(children, `【${audit.projectNo}】`, false)
-      ;(audit.findings || []).forEach((f) => {
-        pushPara(
-          children,
-          `  ${f.supplier || ''}：${f.issue}${f.originalSpec ? '（原要求：' + f.originalSpec + '）' : ''}${f.impact ? '。影响：' + f.impact : ''}`,
-          false,
-        )
-      })
-    })
-  }
-
-  if (r.costBreakdown) {
-    pushHeading(children, '四、成本拆解分析')
-    pushPara(children, r.costBreakdown)
-  }
-
-  if (r.toolingAnalysis) {
-    pushHeading(children, '五、模具费分析')
-    pushPara(children, r.toolingAnalysis)
-  }
-
-  // 建议与风险
-  if (r.recommendation) {
-    pushHeading(children, '六、谈判与选型建议')
-    if (r.recommendation.selection) pushPara(children, `选型：${r.recommendation.selection}`)
-    if (r.recommendation.negotiation?.length) {
-      pushPara(children, '谈判筹码：')
-      r.recommendation.negotiation.forEach((n) => pushPara(children, `• ${n}`, false))
-    }
-    if (r.recommendation.nextSteps) pushPara(children, `下一步：${r.recommendation.nextSteps}`)
-  }
-
-  if (r.risks?.length) {
-    pushHeading(children, '七、风险提示')
-    r.risks.forEach((risk) => pushPara(children, `• ${risk}`, false))
-  }
-
-  // 附：比价明细表
-  if (items?.length) {
-    pushHeading(children, '附：报价比价明细表')
-    children.push(buildComparisonTable(suppliers, items))
-  }
-
-  const doc = new Document({ sections: [{ children }] })
-  const blob = await Packer.toBlob(doc)
-  saveAs(blob, `报价比价分析报告_${dateStamp()}.docx`)
+  const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' })
+  saveAs(blob, `报价比价报告_${dateStamp()}.xls`)
 }
 
-// 导出为 PDF：调用浏览器打印对话框（零依赖，中文无障碍）。
-// 配合 index.css 的 @media print 样式，只打印 .printable 区域。
+// 保留旧 Word 导出入口（若他处引用）；改为简表
+export async function exportReportToDocx(report, suppliers, items) {
+  exportReportToExcel(report, suppliers, items)
+}
+
 export function exportReportToPDF() {
   window.print()
 }
 
-// 构建比价明细 Word 表格
-function buildComparisonTable(suppliers, items) {
-  const headerCells = [
-    cellText('项目号'),
-    cellText('类型'),
-    ...suppliers.map((s) => cellText(s.name)),
-    cellText('最低'),
+function buildVerdictSheet(r) {
+  const v = asBilingual(r.verdict)
+  return worksheet('结论 Verdict', [
+    ['字段 / Field', '中文 ZH', 'English EN'],
+    ['结论 Verdict', v.zh, v.en],
+  ])
+}
+
+function buildRankingSheet(r) {
+  const rows = [['#', '供应商 Supplier', '最低价项数 Wins', '备注 ZH', 'Note EN']]
+  for (const row of r.ranking || []) {
+    const note = asBilingual(row.note)
+    rows.push([
+      row.rank ?? '',
+      row.supplier || '',
+      row.lowestWins ?? '',
+      note.zh,
+      note.en,
+    ])
+  }
+  if (rows.length === 1) rows.push(['—', '—', '—', '—', '—'])
+  return worksheet('排名 Ranking', rows)
+}
+
+function buildMatrixSheet(suppliers = [], items = []) {
+  const header = [
+    '项目号 Project',
+    '类型 Type',
+    ...suppliers.map((s) => s.name),
+    '最低 Lowest',
   ]
-
-  const rows = items.slice(0, 50).map((item) => {
+  const rows = [header]
+  for (const item of items) {
     const lowestName = suppliers.find((s) => s.id === item.lowestSupplierId)?.name || ''
-    return new TableRow({
-      children: [
-        cellText(item.projectNo),
-        cellText(item.name),
-        ...suppliers.map((s) => {
-          const q = item.quotes.find((x) => x.supplierId === s.id)
-          return cellText(q?.matched && q.totalPrice != null ? formatPrice(q.totalPrice) : '漏报')
-        }),
-        cellText(lowestName),
-      ],
+    rows.push([
+      item.projectNo || '',
+      item.name || '',
+      ...suppliers.map((s) => {
+        const q = item.quotes?.find((x) => x.supplierId === s.id)
+        if (!q?.matched || q.totalPrice == null) return '漏报'
+        return formatPrice(q.totalPrice)
+      }),
+      lowestName,
+    ])
+  }
+  if (rows.length === 1) rows.push(['—', '—', ...suppliers.map(() => '—'), '—'])
+  return worksheet('比价矩阵 Matrix', rows)
+}
+
+function buildGapsSheet(r) {
+  const rows = [['项目号', '最低', '最高', '价差%', '备注 ZH', 'Note EN']]
+  for (const row of r.keyGaps || []) {
+    const note = asBilingual(row.note)
+    rows.push([
+      row.projectNo || '',
+      row.lowest || '',
+      row.highest || '',
+      row.gapPct != null ? `${row.gapPct}%` : '',
+      note.zh,
+      note.en,
+    ])
+  }
+  if (rows.length === 1) rows.push(['—', '—', '—', '—', '—', '—'])
+  return worksheet('关键价差 Gaps', rows)
+}
+
+function buildSpecSheet(r) {
+  const rows = [['项目号', '供应商', '问题 ZH', 'Issue EN']]
+  for (const row of r.specIssues || []) {
+    const issue = asBilingual(row.issue)
+    rows.push([row.projectNo || '', row.supplier || '', issue.zh, issue.en])
+  }
+  if (rows.length === 1) rows.push(['—', '—', '—', '—'])
+  return worksheet('规格问题 Spec', rows)
+}
+
+function buildActionsSheet(r) {
+  const rows = [['类型 Type', '中文 ZH', 'English EN']]
+  for (const step of r.nextSteps || []) {
+    const t = asBilingual(step)
+    rows.push(['下一步 Next', t.zh, t.en])
+  }
+  for (const risk of r.risks || []) {
+    const t = asBilingual(risk)
+    rows.push(['风险 Risk', t.zh, t.en])
+  }
+  if (rows.length === 1) rows.push(['—', '—', '—'])
+  return worksheet('行动与风险 Actions', rows)
+}
+
+function worksheet(name, rows) {
+  const safeName = String(name).replace(/[\\/*?:\[\]]/g, ' ').slice(0, 31)
+  const xmlRows = rows
+    .map((row) => {
+      const cells = row
+        .map((cell) => {
+          const text = escapeXml(cell == null ? '' : String(cell))
+          const isNum = typeof cell === 'number' || (typeof cell === 'string' && /^-?\d+(\.\d+)?$/.test(cell))
+          if (isNum && cell !== '') {
+            return `<Cell><Data ss:Type="Number">${escapeXml(String(cell))}</Data></Cell>`
+          }
+          return `<Cell><Data ss:Type="String">${text}</Data></Cell>`
+        })
+        .join('')
+      return `<Row>${cells}</Row>`
     })
-  })
-
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    rows: [new TableRow({ children: headerCells, tableHeader: true }), ...rows],
-  })
+    .join('')
+  return `<Worksheet ss:Name="${escapeXml(safeName)}"><Table>${xmlRows}</Table></Worksheet>`
 }
 
-function cellText(text) {
-  return new TableCell({
-    children: [new Paragraph({ children: [new TextRun({ text: String(text ?? ''), size: 18 })] })],
-  })
-}
-
-function pushHeading(children, text) {
-  children.push(
-    new Paragraph({
-      heading: HeadingLevel.HEADING_1,
-      spacing: { before: 240, after: 120 },
-      children: [new TextRun({ text, bold: true, size: 28 })],
-    }),
-  )
-}
-
-function pushPara(children, text, indent = true) {
-  if (!text) return
-  children.push(
-    new Paragraph({
-      spacing: { after: 80 },
-      indent: indent ? { left: 0 } : undefined,
-      children: [new TextRun({ text, size: 22 })],
-    }),
-  )
-}
-
-function nowText() {
-  const d = new Date()
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+function escapeXml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 function dateStamp() {

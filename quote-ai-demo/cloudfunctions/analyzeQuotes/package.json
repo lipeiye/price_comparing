@@ -1,6 +1,8 @@
 {
   "name": "analyze-quotes",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "main": "index.js",
-  "dependencies": {}
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.10.0"
+  }
 }

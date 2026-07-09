@@ -1,22 +1,24 @@
 const { quoteAnalysisPrompt } = require('./prompt')
 const { quoteAnalysisSchema } = require('./schema')
 const { alignQuotes } = require('./align')
+const {
+  hashWorkbooks,
+  getByHash,
+  saveAnalyzeResult,
+  toAnalyzeResponse,
+} = require('./cache')
 
-// 两段式架构（修复"没有真正比价"的根因）：
-// 1. 代码做结构化对齐：按表头文字识别价格列、按项目号跨家对齐、算最低/最高/均价、
-//    检测漏报、量级异常、模具费。比价表永不为空，不依赖 AI。
-// 2. AI 只做叙述：中文采购建议 + 检测"供应商擅自改规格"。AI 超时/失败时，比价报告照常返回。
+// 两段式架构：
+// 1. 代码对齐（秒级）
+// 2. AI 叙述；若 contentHash 命中服务端缓存则跳过 AI
 const MIN_WORKBOOKS = 2
-const MAX_WORKBOOKS = 3
-const MAX_PAYLOAD_CHARS = 1200000
+const MAX_WORKBOOKS = 8
+const MAX_PAYLOAD_CHARS = 2000000
 
-// AI 调用预算：结构化对齐由代码秒级完成，AI 叙述可使用全部剩余预算。
-// 全局截止线必须小于 CloudBase 函数执行超时（当前 200s），留足返回与网关开销。
 const OVERALL_DEADLINE_MS = 185000
 const AI_ATTEMPT_TIMEOUT_MS = 175000
 
-// 部署版本标记：健康检查返回，用于秒级确认线上跑的是哪一版代码
-const FUNCTION_VERSION = 'v4-align-engine-185s'
+const FUNCTION_VERSION = 'v6-cache-hash-30d'
 
 exports.main = async (event = {}) => {
   const requestId = event.requestId || event.requestContext?.requestId || `req_${Date.now()}`
@@ -27,12 +29,31 @@ exports.main = async (event = {}) => {
     }
 
     if (isHealthCheck(event)) {
-      return response(200, { success: true, pong: true, version: FUNCTION_VERSION })
+      return response(200, { success: true, pong: true, version: FUNCTION_VERSION, cache: true })
     }
 
-    const workbooks = parseWorkbooks(event)
+    const parsed = parseRequest(event)
 
-    // 第一段：代码对齐——比价表永不为空的核心保证
+    // 仅用 hash 拉取缓存（前端「恢复上次」走云端）
+    if (parsed.mode === 'lookup') {
+      const doc = await getByHash(parsed.contentHash)
+      if (!doc || !Array.isArray(doc.items) || doc.items.length === 0) {
+        throw userError('未找到该比价缓存，或已过期。请重新上传报价单。', 404)
+      }
+      return response(200, toAnalyzeResponse(doc, { requestId, cacheHit: true }))
+    }
+
+    const workbooks = parsed.workbooks
+    const contentHash = hashWorkbooks(workbooks)
+
+    // 服务端缓存命中：整份结果直接返回，不调 AI
+    const cached = await getByHash(contentHash)
+    if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
+      console.log(JSON.stringify({ requestId, message: 'cache hit', contentHash }))
+      return response(200, toAnalyzeResponse(cached, { requestId, cacheHit: true }))
+    }
+
+    // 第一段：代码对齐
     const aligned = alignQuotes(workbooks)
 
     if (aligned.items.length === 0) {
@@ -42,9 +63,9 @@ exports.main = async (event = {}) => {
       )
     }
 
-    // 第二段：AI 叙述。失败不阻断，比价报告照常返回（缺 summary 和补充异常）。
+    // 第二段：AI 叙述
     const deadlineAt = Date.now() + OVERALL_DEADLINE_MS
-    let aiNarrative = { summary: '', warnings: [] }
+    let aiNarrative = { summary: { zh: '', en: '' }, warnings: [] }
     try {
       aiNarrative = await callAi(aligned, workbooks, requestId, { deadlineAt })
     } catch (aiError) {
@@ -56,22 +77,39 @@ exports.main = async (event = {}) => {
         }),
       )
       aiNarrative = {
-        summary: 'AI 采购建议生成失败，以下为系统自动比价结果。最低价已逐项标出，请据此判断。',
+        summary: {
+          zh: 'AI 采购建议生成失败，以下为系统自动比价结果。最低价已逐项标出，请据此判断。',
+          en: 'AI summary failed. Auto comparison below — lowest prices are marked per item.',
+        },
         warnings: [],
       }
     }
 
-    // 合并：代码检测的异常 + AI 补充的异常
-    const mergedWarnings = [...aligned.warnings, ...aiNarrative.warnings]
-
-    return response(200, {
+    const mergedWarnings = [...aligned.warnings, ...(aiNarrative.warnings || [])]
+    const resultBody = {
       success: true,
       requestId,
+      cacheHit: false,
+      contentHash,
       suppliers: aligned.suppliers,
       items: aligned.items,
       warnings: mergedWarnings,
       summary: aiNarrative.summary,
+      cachedReport: null,
+    }
+
+    // 异步不阻塞返回：写入失败只打日志
+    await saveAnalyzeResult(contentHash, {
+      fileNames: workbooks.map((w) => w.filename),
+      suppliers: aligned.suppliers,
+      items: aligned.items,
+      warnings: mergedWarnings,
+      summary: aiNarrative.summary,
+      // 瘦身存盘：只留 filename + 主表前 40 行，供日后恢复报告上下文
+      rawWorkbooks: slimWorkbooksForCache(workbooks),
     })
+
+    return response(200, resultBody)
   } catch (error) {
     console.error(
       JSON.stringify({ requestId, message: error.message, code: error.code, stack: error.stack }),
@@ -85,7 +123,17 @@ exports.main = async (event = {}) => {
   }
 }
 
-function parseWorkbooks(event) {
+function slimWorkbooksForCache(workbooks) {
+  return workbooks.map((wb) => ({
+    filename: wb.filename,
+    sheets: (wb.sheets || []).slice(0, 2).map((s) => ({
+      sheetName: s.sheetName,
+      rows: (s.rows || []).slice(0, 40),
+    })),
+  }))
+}
+
+function parseRequest(event) {
   const contentType = event.headers?.['content-type'] || event.headers?.['Content-Type'] || ''
 
   if (contentType.includes('multipart/form-data')) {
@@ -101,11 +149,21 @@ function parseWorkbooks(event) {
 
   let payload
   try {
-    payload = JSON.parse(bodyText)
+    payload = bodyText ? JSON.parse(bodyText) : {}
   } catch {
     const error = userError(`请求体不是合法 JSON。当前 content-type: ${contentType || '空'}`, 400)
     error.exposeDetail = true
     throw error
+  }
+
+  // 仅 hash 查询
+  if (payload?.action === 'lookup' || (payload?.contentHash && !payload?.workbooks)) {
+    const contentHash =
+      typeof payload.contentHash === 'string' ? payload.contentHash.trim() : ''
+    if (!/^[a-f0-9]{64}$/i.test(contentHash)) {
+      throw userError('contentHash 无效。', 400)
+    }
+    return { mode: 'lookup', contentHash: contentHash.toLowerCase() }
   }
 
   const workbooks = payload?.workbooks
@@ -113,10 +171,13 @@ function parseWorkbooks(event) {
     throw userError('请至少上传 2 份供应商 Excel 报价单。', 400)
   }
   if (workbooks.length > MAX_WORKBOOKS) {
-    throw userError('最多只能上传 3 份供应商 Excel 报价单。', 400)
+    throw userError(`最多只能上传 ${MAX_WORKBOOKS} 份供应商 Excel 报价单。`, 400)
   }
 
-  return workbooks.map(sanitizeWorkbook)
+  return {
+    mode: 'analyze',
+    workbooks: workbooks.map(sanitizeWorkbook),
+  }
 }
 
 function sanitizeWorkbook(workbook, index) {
@@ -175,7 +236,6 @@ async function callAi(aligned, workbooks, requestId, { deadlineAt } = {}) {
   const timer = setTimeout(() => controller.abort(), attemptTimeout)
 
   try {
-    // 给 AI 的输入：对齐后的结构化结果 + 一份精简的原始表格（用于规格篡改检测）
     const slimRaw = workbooks.map((wb) => ({
       filename: wb.filename,
       sheets: wb.sheets.map((s) => ({
@@ -245,7 +305,7 @@ async function callAi(aligned, workbooks, requestId, { deadlineAt } = {}) {
     }
 
     return {
-      summary: typeof parsedContent.summary === 'string' ? parsedContent.summary : '',
+      summary: normalizeSummary(parsedContent.summary),
       warnings: Array.isArray(parsedContent.warnings) ? parsedContent.warnings : [],
     }
   } catch (error) {
@@ -256,6 +316,19 @@ async function callAi(aligned, workbooks, requestId, { deadlineAt } = {}) {
   } finally {
     clearTimeout(timer)
   }
+}
+
+function normalizeSummary(summary) {
+  if (summary && typeof summary === 'object' && !Array.isArray(summary)) {
+    return {
+      zh: typeof summary.zh === 'string' ? summary.zh : '',
+      en: typeof summary.en === 'string' ? summary.en : '',
+    }
+  }
+  if (typeof summary === 'string' && summary.trim()) {
+    return { zh: summary, en: summary }
+  }
+  return { zh: '', en: '' }
 }
 
 function extractAiErrorMessage(payload, responseText) {

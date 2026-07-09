@@ -17,7 +17,7 @@ function Header() {
 
         <div className="header-meta">
           <span>桌面端优先</span>
-          <span>2-3 份 Excel 报价单</span>
+          <span>2–8 份 Excel 报价单</span>
           <span className="success-badge">
             <ShieldCheck size={16} />
             {isMockAnalysisMode ? '本地 Mock 模式' : '真实 AI 已接入'}

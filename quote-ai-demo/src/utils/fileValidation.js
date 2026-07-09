@@ -1,4 +1,4 @@
-const MAX_FILES = 3
+const MAX_FILES = 8
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ALLOWED_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -22,7 +22,7 @@ export function validateIncomingFiles(incomingFiles, currentFiles) {
 
   for (const file of incomingFiles) {
     if (currentFiles.length + accepted.length >= MAX_FILES) {
-      errors.push('最多只能上传 3 份供应商报价单，第 4 份已被拒绝。')
+      errors.push(`最多只能上传 ${MAX_FILES} 份供应商报价单，第 ${MAX_FILES + 1} 份起已被拒绝。`)
       break
     }
 
@@ -48,6 +48,8 @@ export function validateIncomingFiles(incomingFiles, currentFiles) {
 
   return { accepted, errors }
 }
+
+export { MAX_FILES }
 
 function getFileKey(file) {
   return `${file.name}-${file.size}-${file.type}`

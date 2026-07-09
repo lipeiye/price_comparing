@@ -1,17 +1,13 @@
 const { reportAnalysisPrompt } = require('./prompt')
 const { reportSchema } = require('./schema')
+const { hashWorkbooks, getByHash, saveReport } = require('./cache')
 
 // 详细分析报告云函数（与 analyzeQuotes 解耦）：
-// 输入：前端已算好的 alignedResult（比价结果）+ rawWorkbooks（原始表格）。
-// 输出：深度 Analytical Report（执行摘要/价格分析/规格核对/成本拆解/模具/建议/风险）。
-// 默认使用 deepseek-v4-pro（强推理），通过 AI_REPORT_MODEL 环境变量配置。
+// 输入：alignedResult + rawWorkbooks；按 contentHash 缓存，命中则跳过 AI。
+// 全程 deepseek-v4-flash，速度优先。
 const MAX_PAYLOAD_CHARS = 1500000
-
-// v4-pro 默认开启思考模式，耗时更长，预留更充裕预算。
-// 必须小于云函数执行超时（建议控制台设为 300 秒）。
-const AI_ATTEMPT_TIMEOUT_MS = 270000
-
-const FUNCTION_VERSION = 'v1-report-pro'
+const AI_ATTEMPT_TIMEOUT_MS = 90000
+const FUNCTION_VERSION = 'v3-report-cache-hash'
 
 exports.main = async (event = {}) => {
   const requestId = event.requestId || event.requestContext?.requestId || `req_${Date.now()}`
@@ -22,23 +18,51 @@ exports.main = async (event = {}) => {
     }
 
     if (isHealthCheck(event)) {
-      return response(200, { success: true, pong: true, version: FUNCTION_VERSION })
+      return response(200, { success: true, pong: true, version: FUNCTION_VERSION, cache: true })
     }
 
     const payload = parsePayload(event)
-    const { alignedResult, rawWorkbooks } = payload
+    const { alignedResult, rawWorkbooks, contentHash: clientHash } = payload
 
     if (!alignedResult || !Array.isArray(alignedResult.items) || alignedResult.items.length === 0) {
       throw userError('缺少有效的比价结果（alignedResult.items 为空）。请先完成快速比价。', 400)
     }
 
+    const contentHash =
+      (typeof clientHash === 'string' && /^[a-f0-9]{64}$/i.test(clientHash)
+        ? clientHash.toLowerCase()
+        : null) || (rawWorkbooks.length > 0 ? hashWorkbooks(rawWorkbooks) : null)
+
+    // 服务端已有报告 → 直接返回
+    if (contentHash) {
+      const cached = await getByHash(contentHash)
+      if (cached?.report) {
+        console.log(JSON.stringify({ requestId, message: 'report cache hit', contentHash }))
+        return response(200, {
+          success: true,
+          requestId,
+          cacheHit: true,
+          contentHash,
+          report: cached.report,
+          generatedAt: cached.reportGeneratedAt || new Date().toISOString(),
+        })
+      }
+    }
+
     const report = await callAi(alignedResult, rawWorkbooks, requestId)
+    const generatedAt = new Date().toISOString()
+
+    if (contentHash) {
+      await saveReport(contentHash, report, generatedAt)
+    }
 
     return response(200, {
       success: true,
       requestId,
+      cacheHit: false,
+      contentHash: contentHash || undefined,
       report,
-      generatedAt: new Date().toISOString(),
+      generatedAt,
     })
   } catch (error) {
     console.error(
@@ -72,12 +96,16 @@ function parsePayload(event) {
   return {
     alignedResult: payload?.alignedResult,
     rawWorkbooks: Array.isArray(payload?.rawWorkbooks) ? payload.rawWorkbooks : [],
+    contentHash: payload?.contentHash,
   }
 }
 
 async function callAi(alignedResult, rawWorkbooks, requestId) {
   const apiKey = process.env.AI_API_KEY
-  const model = process.env.AI_REPORT_MODEL || 'deepseek-v4-pro'
+  // 全程强制 Flash（忽略控制台里可能残留的 AI_REPORT_MODEL=pro）
+  const requested = process.env.AI_REPORT_MODEL || process.env.AI_MODEL || 'deepseek-v4-flash'
+  const model =
+    /pro|reasoner/i.test(String(requested)) ? 'deepseek-v4-flash' : String(requested)
   const endpoint = resolveEndpoint()
 
   if (!apiKey) {
@@ -87,7 +115,7 @@ async function callAi(alignedResult, rawWorkbooks, requestId) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), AI_ATTEMPT_TIMEOUT_MS)
 
-  // 给 AI 的原始表格做瘦身：只保留报价主 sheet 的前 60 行，控制 token
+  // 瘦身原始表：主 sheet 前 60 行，控制 token
   const slimRaw = rawWorkbooks.map((wb) => ({
     filename: wb.filename,
     sheets: (wb.sheets || []).map((s) => ({
@@ -95,6 +123,26 @@ async function callAi(alignedResult, rawWorkbooks, requestId) {
       rows: (s.rows || []).slice(0, 60),
     })),
   }))
+
+  // 给 AI 的对齐结果也做瘦身：价格字段足够，去掉冗长 costBreakdown 明细以外的噪声
+  const slimAligned = {
+    suppliers: alignedResult.suppliers,
+    codeWarnings: alignedResult.warnings || alignedResult.codeWarnings || [],
+    items: (alignedResult.items || []).map((item) => ({
+      projectNo: item.projectNo,
+      name: item.name,
+      lowestSupplierId: item.lowestSupplierId,
+      lowestPrice: item.lowestPrice,
+      highestPrice: item.highestPrice,
+      averagePrice: item.averagePrice,
+      quotes: (item.quotes || []).map((q) => ({
+        supplierId: q.supplierId,
+        matched: q.matched,
+        totalPrice: q.totalPrice,
+        costBreakdown: q.costBreakdown,
+      })),
+    })),
+  }
 
   try {
     const aiResponse = await fetch(endpoint, {
@@ -105,7 +153,7 @@ async function callAi(alignedResult, rawWorkbooks, requestId) {
       },
       body: JSON.stringify({
         model,
-        // v4-pro 思考模式下 temperature 会被忽略，但保留 json_object 约束输出格式
+        temperature: 0,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: reportAnalysisPrompt },
@@ -114,7 +162,7 @@ async function callAi(alignedResult, rawWorkbooks, requestId) {
             content: JSON.stringify({
               requestId,
               outputSchema: reportSchema,
-              alignedResult,
+              alignedResult: slimAligned,
               rawWorkbooks: slimRaw,
             }),
           },
@@ -156,7 +204,7 @@ async function callAi(alignedResult, rawWorkbooks, requestId) {
     return normalizeReport(parsed)
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw userError('详细报告生成超时（推理模型耗时较长），请稍后重试。', 504)
+      throw userError('详细报告生成超时，请稍后重试。', 504)
     }
     throw error
   } finally {
@@ -164,26 +212,98 @@ async function callAi(alignedResult, rawWorkbooks, requestId) {
   }
 }
 
-// 容错归一化：AI 偶尔会漏字段或字段类型不对，保证前端拿到稳定结构
+function bilingual(value, fallback = '') {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return {
+      zh: typeof value.zh === 'string' ? value.zh : fallback,
+      en: typeof value.en === 'string' ? value.en : fallback,
+    }
+  }
+  if (typeof value === 'string') {
+    return { zh: value, en: value }
+  }
+  return { zh: fallback, en: fallback }
+}
+
 function normalizeReport(raw) {
-  const str = (v, fallback = '') => (typeof v === 'string' ? v : fallback)
   const arr = (v) => (Array.isArray(v) ? v : [])
+
+  // 兼容旧七章结构：尽量映射到新结构，避免缓存/旧响应炸前端
+  if (raw?.executiveSummary && !raw?.verdict) {
+    return normalizeLegacyReport(raw)
+  }
+
   return {
-    executiveSummary: str(raw?.executiveSummary),
-    priceAnalysis: {
-      overallRanking: arr(raw?.priceAnalysis?.overallRanking),
-      spreadInsights: arr(raw?.priceAnalysis?.spreadInsights),
-      costPerformance: str(raw?.priceAnalysis?.costPerformance),
-    },
-    specAudit: arr(raw?.specAudit),
-    costBreakdown: str(raw?.costBreakdown),
-    toolingAnalysis: str(raw?.toolingAnalysis),
-    recommendation: {
-      selection: str(raw?.recommendation?.selection),
-      negotiation: arr(raw?.recommendation?.negotiation),
-      nextSteps: str(raw?.recommendation?.nextSteps),
-    },
-    risks: arr(raw?.risks),
+    verdict: bilingual(raw?.verdict),
+    ranking: arr(raw?.ranking)
+      .slice(0, 12)
+      .map((row, idx) => ({
+        rank: Number.isFinite(Number(row?.rank)) ? Number(row.rank) : idx + 1,
+        supplier: typeof row?.supplier === 'string' ? row.supplier : '',
+        lowestWins: Number.isFinite(Number(row?.lowestWins)) ? Number(row.lowestWins) : null,
+        note: bilingual(row?.note),
+      })),
+    keyGaps: arr(raw?.keyGaps)
+      .slice(0, 6)
+      .map((row) => ({
+        projectNo: typeof row?.projectNo === 'string' ? row.projectNo : '',
+        lowest: typeof row?.lowest === 'string' ? row.lowest : '',
+        highest: typeof row?.highest === 'string' ? row.highest : '',
+        gapPct: Number.isFinite(Number(row?.gapPct)) ? Number(row.gapPct) : null,
+        note: bilingual(row?.note),
+      })),
+    specIssues: arr(raw?.specIssues)
+      .slice(0, 8)
+      .map((row) => ({
+        projectNo: typeof row?.projectNo === 'string' ? row.projectNo : '',
+        supplier: typeof row?.supplier === 'string' ? row.supplier : '',
+        issue: bilingual(row?.issue),
+      })),
+    nextSteps: arr(raw?.nextSteps)
+      .slice(0, 3)
+      .map((step) => bilingual(step)),
+    risks: arr(raw?.risks)
+      .slice(0, 3)
+      .map((risk) => bilingual(risk)),
+  }
+}
+
+function normalizeLegacyReport(raw) {
+  const arr = (v) => (Array.isArray(v) ? v : [])
+  const ranking = arr(raw?.priceAnalysis?.overallRanking).map((item, idx) => ({
+    rank: item.rank || idx + 1,
+    supplier: item.supplier || '',
+    lowestWins: null,
+    note: bilingual(item.note || item.avgPriceLevel || ''),
+  }))
+  const specIssues = arr(raw?.specAudit).flatMap((audit) =>
+    arr(audit?.findings).map((f) => ({
+      projectNo: audit.projectNo || '',
+      supplier: f.supplier || '',
+      issue: bilingual(
+        [f.issue, f.originalSpec ? `原要求：${f.originalSpec}` : ''].filter(Boolean).join('；'),
+      ),
+    })),
+  )
+  return {
+    verdict: bilingual(raw.executiveSummary),
+    ranking,
+    keyGaps: arr(raw?.priceAnalysis?.spreadInsights)
+      .slice(0, 6)
+      .map((s) => ({
+        projectNo: '',
+        lowest: '',
+        highest: '',
+        gapPct: null,
+        note: bilingual(s),
+      })),
+    specIssues: specIssues.slice(0, 8),
+    nextSteps: raw?.recommendation?.nextSteps
+      ? [bilingual(raw.recommendation.nextSteps)]
+      : raw?.recommendation?.selection
+        ? [bilingual(raw.recommendation.selection)]
+        : [],
+    risks: arr(raw?.risks).slice(0, 3).map((r) => bilingual(r)),
   }
 }
 

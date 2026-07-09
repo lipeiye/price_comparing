@@ -263,6 +263,8 @@ export const mockResult = {
       message: '不锈钢管的供应商 A 运费为 1200 元，建议比较含运费落地价。',
     },
   ],
-  summary:
-    '供应商 A 在工业电机和控制柜上具备价格优势，供应商 B 在变频器和不锈钢管上更低。建议优先与供应商 A 洽谈电机税费口径和控制柜交期，同时要求供应商 B 补报压力传感器；不锈钢管可按供应商 B 作为首选，最终下单前应统一含税、运费和规格口径。',
+  summary: {
+    zh: '整体看 A 电机/控制柜更低，B 变频器/不锈钢管更低。先让 A 统一税费口径，要求 B 补报传感器；下单前统一含税与运费。',
+    en: 'A wins on motors/cabinets; B wins on drives/tubing. Align tax with A, get sensor quote from B, unify tax/shipping before PO.',
+  },
 }

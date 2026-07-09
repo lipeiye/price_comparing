@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BrainCircuit, CheckCircle2, FileSearch, RotateCcw, Sparkles, Loader2 } from 'lucide-react'
+import {
+  BrainCircuit,
+  CheckCircle2,
+  FileSearch,
+  RotateCcw,
+  Sparkles,
+  Loader2,
+  History,
+  Zap,
+} from 'lucide-react'
 import Header from './components/Header.jsx'
 import UploadZone from './components/UploadZone.jsx'
 import ErrorBanner from './components/ErrorBanner.jsx'
@@ -9,12 +18,22 @@ import WarningCard from './components/WarningCard.jsx'
 import RecommendationPanel from './components/RecommendationPanel.jsx'
 import ReportPanel from './components/ReportPanel.jsx'
 import OnboardingGuide from './components/OnboardingGuide.jsx'
-import { analyzeQuotes, isMockAnalysisMode } from './services/analyzeQuotes.js'
+import {
+  analyzeQuotes,
+  isMockAnalysisMode,
+  restoreByContentHash,
+} from './services/analyzeQuotes.js'
 import {
   generateReport,
   loadCachedReport,
 } from './services/generateReport.js'
 import { formatFileSize } from './utils/formatters.js'
+import {
+  saveSession,
+  loadSession,
+  clearSession,
+  patchSessionReport,
+} from './utils/sessionStore.js'
 
 const progressSteps = [
   '正在读取 Excel 工作表',
@@ -30,18 +49,19 @@ function App() {
   const [activeStep, setActiveStep] = useState(-1)
   const [result, setResult] = useState(null)
   const [elapsedMs, setElapsedMs] = useState(0)
+  const [cacheBanner, setCacheBanner] = useState('')
 
-  // 详细报告相关状态
   const [report, setReport] = useState(null)
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [reportError, setReportError] = useState('')
   const [reportElapsedMs, setReportElapsedMs] = useState(0)
 
-  // 持有最近一次分析使用的 workbooks，供详细报告接口复用
+  const [savedSession, setSavedSession] = useState(() => loadSession())
+
   const workbooksRef = useRef(null)
   const analyzedFilesRef = useRef([])
+  const contentHashRef = useRef(null)
 
-  // 快速比价等待计时
   useEffect(() => {
     if (!isAnalyzing) return undefined
     const start = Date.now()
@@ -50,7 +70,6 @@ function App() {
     return () => clearInterval(id)
   }, [isAnalyzing])
 
-  // 详细报告等待计时
   useEffect(() => {
     if (!isGeneratingReport) return undefined
     const start = Date.now()
@@ -73,6 +92,7 @@ function App() {
     }
 
     setError('')
+    setCacheBanner('')
     setResult(null)
     setReport(null)
     setReportError('')
@@ -82,18 +102,19 @@ function App() {
     try {
       for (let index = 0; index < progressSteps.length; index += 1) {
         setActiveStep(index)
-        await new Promise((resolve) => setTimeout(resolve, index === 0 ? 450 : 520))
+        await new Promise((resolve) => setTimeout(resolve, index === 0 ? 350 : 400))
       }
 
       const { result: analysisResult, workbooks } = await analyzeQuotes(files)
-      setResult(analysisResult)
-      workbooksRef.current = workbooks
-      analyzedFilesRef.current = files
-      setActiveStep(progressSteps.length)
+      applyAnalysisResult(analysisResult, workbooks, files)
 
-      // 分析完成后，尝试恢复同份文件的历史报告缓存
-      const cached = loadCachedReport(files)
-      if (cached) setReport(cached)
+      // 本地报告指纹缓存（同文件名大小）
+      if (!analysisResult.cachedReport) {
+        const localReport = loadCachedReport(files)
+        if (localReport) setReport(localReport)
+      }
+
+      setActiveStep(progressSteps.length)
     } catch (analysisError) {
       setError(analysisError.message || '分析失败，请删除文件后重新上传再试。')
       setActiveStep(-1)
@@ -102,9 +123,101 @@ function App() {
     }
   }
 
+  function applyAnalysisResult(analysisResult, workbooks, sourceFiles) {
+    setResult(analysisResult)
+    workbooksRef.current = workbooks
+    analyzedFilesRef.current = sourceFiles || []
+    contentHashRef.current = analysisResult.contentHash || null
+
+    if (analysisResult.cacheHit) {
+      setCacheBanner('命中历史结果，未再次调用 AI（已省 token）')
+    } else {
+      setCacheBanner('')
+    }
+
+    if (analysisResult.cachedReport?.report) {
+      setReport({
+        report: analysisResult.cachedReport.report,
+        generatedAt: analysisResult.cachedReport.generatedAt,
+        cacheHit: true,
+      })
+    }
+
+    const session = {
+      contentHash: analysisResult.contentHash,
+      fileNames: (sourceFiles || []).map((f) => f.name).filter(Boolean),
+      result: analysisResult,
+      workbooks,
+      report: analysisResult.cachedReport?.report
+        ? {
+            report: analysisResult.cachedReport.report,
+            generatedAt: analysisResult.cachedReport.generatedAt,
+            cacheHit: true,
+          }
+        : null,
+      cacheHit: Boolean(analysisResult.cacheHit),
+    }
+    // 若 sourceFiles 无 name（云端恢复），用 result 里没有文件名时用已有
+    if (!session.fileNames.length && analysisResult.fileNames) {
+      session.fileNames = analysisResult.fileNames
+    }
+    saveSession(session)
+    setSavedSession(loadSession())
+  }
+
+  async function handleRestoreLocal() {
+    const session = loadSession()
+    if (!session?.result) {
+      setError('没有可恢复的本机记录。')
+      setSavedSession(null)
+      return
+    }
+    setError('')
+    setResult(session.result)
+    workbooksRef.current = session.workbooks
+    contentHashRef.current = session.contentHash
+    analyzedFilesRef.current = []
+    setReport(session.report || null)
+    setCacheBanner(
+      session.cacheHit
+        ? '已恢复上次比价（来自本机快照 · 当时命中云端缓存）'
+        : '已恢复上次比价（来自本机快照）',
+    )
+    setActiveStep(progressSteps.length)
+  }
+
+  async function handleRestoreCloud() {
+    const session = loadSession()
+    const hash = session?.contentHash
+    if (!hash || hash === 'mock-local') {
+      setError('没有可用的云端 contentHash，请用本机恢复或重新上传。')
+      return
+    }
+    setError('')
+    setIsAnalyzing(true)
+    setCacheBanner('')
+    try {
+      const data = await restoreByContentHash(hash)
+      applyAnalysisResult(data, session.workbooks || data.rawWorkbooks || null, [])
+      if (!data.cachedReport && session.report) {
+        setReport(session.report)
+      }
+      setCacheBanner('已从云端缓存恢复，未调用 AI')
+      setActiveStep(progressSteps.length)
+    } catch (err) {
+      setError(err.message || '云端恢复失败')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
   async function handleGenerateReport() {
-    if (!result || !workbooksRef.current) {
+    if (!result) {
       setReportError('请先完成快速比价，再生成详细报告。')
+      return
+    }
+    if (!workbooksRef.current) {
+      setReportError('缺少原始表格数据。请重新上传文件后比价，或使用本机快照恢复（需含表格）。')
       return
     }
     setReportError('')
@@ -112,10 +225,20 @@ function App() {
     setReport(null)
 
     try {
-      const reportData = await generateReport(result, workbooksRef.current, analyzedFilesRef.current)
+      const reportData = await generateReport(
+        result,
+        workbooksRef.current,
+        analyzedFilesRef.current,
+        contentHashRef.current || result.contentHash,
+      )
       setReport(reportData)
-    } catch (reportError) {
-      setReportError(reportError.message || '详细报告生成失败，请稍后重试。')
+      patchSessionReport(reportData)
+      setSavedSession(loadSession())
+      if (reportData.cacheHit) {
+        setCacheBanner('报告命中缓存，未再次调用 AI')
+      }
+    } catch (reportErr) {
+      setReportError(reportErr.message || '详细报告生成失败，请稍后重试。')
     } finally {
       setIsGeneratingReport(false)
     }
@@ -130,9 +253,20 @@ function App() {
     setReport(null)
     setReportError('')
     setIsGeneratingReport(false)
+    setCacheBanner('')
     workbooksRef.current = null
     analyzedFilesRef.current = []
+    contentHashRef.current = null
   }
+
+  function handleClearSaved() {
+    clearSession()
+    setSavedSession(null)
+  }
+
+  const sessionLabel = savedSession
+    ? formatSessionLabel(savedSession)
+    : ''
 
   return (
     <div className="app-shell">
@@ -152,6 +286,36 @@ function App() {
               </span>
             </div>
 
+            {savedSession && !result ? (
+              <div className="session-restore">
+                <div className="session-restore-text">
+                  <History size={16} />
+                  <div>
+                    <strong>发现上次比价记录</strong>
+                    <p>{sessionLabel}</p>
+                  </div>
+                </div>
+                <div className="session-restore-actions">
+                  <button type="button" className="ghost-button" onClick={handleRestoreLocal}>
+                    本机恢复
+                  </button>
+                  {!isMockAnalysisMode && savedSession.contentHash ? (
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={handleRestoreCloud}
+                      disabled={isAnalyzing}
+                    >
+                      云端恢复
+                    </button>
+                  ) : null}
+                  <button type="button" className="text-button" onClick={handleClearSaved}>
+                    清除
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <UploadZone
               files={files}
               setFiles={setFiles}
@@ -162,7 +326,7 @@ function App() {
             <ErrorBanner message={error} />
 
             <div className="upload-summary" aria-live="polite">
-              <span>{files.length}/3 份文件</span>
+              <span>{files.length}/8 份文件</span>
               <span>总大小 {formatFileSize(totalSize)}</span>
             </div>
 
@@ -181,8 +345,8 @@ function App() {
                 type="button"
                 className="ghost-button"
                 onClick={handleReset}
-                disabled={isAnalyzing || files.length === 0}
-                title="重置上传文件"
+                disabled={isAnalyzing || (files.length === 0 && !result)}
+                title="重置"
               >
                 <RotateCcw size={18} />
               </button>
@@ -198,7 +362,7 @@ function App() {
               {result ? (
                 <span className="success-badge">
                   <CheckCircle2 size={16} />
-                  已完成
+                  {result.cacheHit ? '缓存命中' : '已完成'}
                 </span>
               ) : null}
             </div>
@@ -209,6 +373,13 @@ function App() {
               isAnalyzing={isAnalyzing}
               elapsedMs={elapsedMs}
             />
+
+            {cacheBanner ? (
+              <div className="cache-banner" role="status">
+                <Zap size={15} />
+                <span>{cacheBanner}</span>
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -221,6 +392,9 @@ function App() {
                   <h2>报价比价表</h2>
                 </div>
                 <div className="panel-heading-right">
+                  {result.cacheHit ? (
+                    <span className="status-pill cache-pill">云端缓存 · 0 token</span>
+                  ) : null}
                   <span className="status-pill">{result.items.length} 个商品</span>
                 </div>
               </div>
@@ -232,27 +406,30 @@ function App() {
                   className="report-button"
                   data-onboarding="report-button"
                   onClick={handleGenerateReport}
-                  disabled={isGeneratingReport}
+                  disabled={isGeneratingReport || !workbooksRef.current}
                 >
                   {isGeneratingReport ? (
                     <>
                       <Loader2 className="spinner" size={18} />
-                      正在生成详细分析报告…
+                      正在生成精简双语报告…
                     </>
                   ) : (
                     <>
                       <Sparkles size={18} />
-                      生成详细分析报告（深度 AI）
+                      生成精简双语报告
                     </>
                   )}
                 </button>
                 {isGeneratingReport ? (
                   <span className="report-timer">
-                    已用时 {Math.floor(reportElapsedMs / 1000)}s · 推理模型较慢，请耐心等待
+                    已用时 {Math.floor(reportElapsedMs / 1000)}s · Flash 模型
                   </span>
+                ) : report?.cacheHit ? (
+                  <span className="report-hint">报告来自缓存，未消耗 AI</span>
                 ) : (
                   <span className="report-hint">
-                    使用更强模型做多维深度分析，可导出 Word/PDF
+                    表格化中英对比 · 可导出 Excel / PDF
+                    {!workbooksRef.current ? ' · 需含原始表格才能生成报告' : ''}
                   </span>
                 )}
               </div>
@@ -270,7 +447,7 @@ function App() {
                   <FileSearch size={20} />
                 </div>
                 <div className="warning-list">
-                  {result.warnings.map((warning) => (
+                  {(result.warnings || []).map((warning) => (
                     <WarningCard key={warning.id} warning={warning} />
                   ))}
                 </div>
@@ -283,8 +460,10 @@ function App() {
           <section className="empty-state">
             <FileSearch size={28} />
             <div>
-              <h2>上传 2 到 3 份 Excel 报价单后开始分析</h2>
-              <p>系统会读取表格内容，通过云函数调用 DeepSeek，并生成比价表、异常提示和采购建议。</p>
+              <h2>上传 2 到 8 份 Excel 报价单后开始分析</h2>
+              <p>
+                系统会按表格内容指纹缓存结果：关页后再传相同文件，或点「恢复」，不会重复消耗 AI。
+              </p>
             </div>
           </section>
         )}
@@ -302,6 +481,24 @@ function App() {
       </main>
     </div>
   )
+}
+
+function formatSessionLabel(session) {
+  const when = session.savedAt
+    ? new Date(session.savedAt).toLocaleString('zh-CN', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : ''
+  const names = (session.fileNames || []).slice(0, 3).join('、')
+  const more =
+    (session.fileNames || []).length > 3 ? ` 等 ${session.fileNames.length} 份` : ''
+  const items = session.result?.items?.length || 0
+  return [when, names ? `${names}${more}` : null, items ? `${items} 个项目` : null]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 export default App

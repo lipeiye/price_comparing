@@ -1,0 +1,30 @@
+{
+  "envId": "price-comparing-demo-d2adc62c70c",
+  "functionRoot": "./cloudfunctions",
+  "functions": [
+    {
+      "name": "analyzeQuotes",
+      "timeout": 200,
+      "runtime": "Nodejs18.15",
+      "handler": "index.main",
+      "installDependency": true,
+      "ignore": [
+        "node_modules",
+        ".git",
+        ".gitignore"
+      ]
+    },
+    {
+      "name": "generateReport",
+      "timeout": 120,
+      "runtime": "Nodejs18.15",
+      "handler": "index.main",
+      "installDependency": true,
+      "ignore": [
+        "node_modules",
+        ".git",
+        ".gitignore"
+      ]
+    }
+  ]
+}

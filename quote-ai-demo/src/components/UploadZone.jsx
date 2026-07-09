@@ -67,7 +67,7 @@ function UploadZone({ files, setFiles, setError, disabled }) {
             <UploadCloud size={26} />
           </div>
           <h3>拖拽 Excel 报价单到这里，或点击上传</h3>
-          <p>仅支持 XLSX；最多 3 份；单份不超过 10 MB。</p>
+          <p>仅支持 XLSX；最多 8 份；单份不超过 10 MB。</p>
         </div>
       </div>
 

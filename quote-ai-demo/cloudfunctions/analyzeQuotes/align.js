@@ -262,7 +262,7 @@ function extractTooling(workbook) {
   return items.filter((it) => it.name || it.price != null)
 }
 
-// 主入口：把 2-3 份工作簿对齐成比价结果。
+// 主入口：把 2–8 份工作簿对齐成比价结果。
 // 返回 { suppliers, items, warnings } —— items 永远包含所有出现过的项目号（漏报记为 null 报价）。
 function alignQuotes(workbooks) {
   const suppliers = workbooks.map((wb, idx) => ({
